@@ -7,5 +7,5 @@
 Activate env to install under. Then:
 
 ``` bash
-pip install -e /Users/<user>/projects/kyber-reserve-manager 
+pip install -e /Users/<user>/projects/kn-reserve-mgr
 ```
