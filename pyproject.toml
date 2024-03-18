@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "kyberReserve"
+version = "0.1.0"
+description = "Tools for access, management and analysis for Kyber Reserve"
+authors = ["Chris Liatas <chris@liatas.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+requests = "^2.31.0"
+aiohttp = "^3.9.3"
+yarl = "^1.9.4"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
