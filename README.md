@@ -4,7 +4,7 @@
 
 ## Install
 
-Activate env to install under. Then:
+Activate env to install under. Then install in editing mode:
 
 ``` bash
 pip install -e /Users/<user>/projects/kn-reserve-mgr

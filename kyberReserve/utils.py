@@ -1,7 +1,9 @@
 import json
 import os
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from time import time
+from typing import Iterator
 
 from kyberReserve.tokens import QUOTE_CURRENCIES
 
@@ -16,8 +18,31 @@ def ts_millis():
     return int(time() * 1000)
 
 
+def dt_ts_milis(date: datetime) -> int:
+    """Return dt object as ms timestamp"""
+    return int(date.timestamp() * 1000)
+
+
 def wei_to_eth(wei: int) -> float:
     return wei / 1e18
+
+
+def dates_gen(
+    step: timedelta, from_time: datetime, to_time: datetime
+) -> Iterator[datetime]:
+    """Generate datetimes in the [from_time, to_time] for given step"""
+    cur = from_time
+    end = to_time
+    while cur < end:
+        yield cur
+        cur += step
+
+
+def str_to_dtime(value: str) -> datetime:
+    date = datetime.strptime(value, "%d/%m/%y %H:%M:%S.%f%z")
+    if date.tzinfo is None:
+        date = date.replace(tzinfo=timezone.utc)
+    return date
 
 
 def load_json_file(key_file: str):

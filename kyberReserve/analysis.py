@@ -140,3 +140,54 @@ def get_analytic_eth_rate_out_to_in(
         return rates["bid"]
     except ZeroDivisionError:
         return 0
+
+
+def find_if_address_in_RFQs(rfqs_result: list, addresses: list):
+    if not isinstance(addresses, list):
+        raise BaseException("addresses input should be list")
+    addresses = [a.lower() for a in addresses]
+    res = {}
+    requests_raw = {}
+    for i in rfqs_result:
+        req = i["log"]["request"]
+        try:
+            # old format
+            addr = req["txOrigin"].lower()
+        except KeyError:
+            # new formats
+            if "userAddress" in req:
+                addr = req["userAddress"].lower()
+            else:
+                addr = req["trader"].lower()
+        if addr in addresses:
+            t = i["time"]
+            req = i["log"]["request"]
+            req["time"] = t
+            print(i)
+            if addr in res:
+                res[addr].append(t)
+            else:
+                res[addr] = [t]
+            if addr in requests_raw:
+                requests_raw[addr].append(req)
+            else:
+                requests_raw[addr] = [req]
+
+    res_new = {}
+    for addr in res:
+        count = len(res[addr])
+        ts_all = res[addr]
+        ts_all.sort(reverse=True)
+        wait_times = []
+        for ind, ts in enumerate(ts_all):
+            if ind > 0:
+                wait_time = ts_all[ind - 1] - ts
+                wait_times.append(wait_time)
+        wait_times.sort()
+        if len(wait_times) > 2:
+            median = wait_times[len(wait_times) // 2]
+        else:
+            median = 0
+        median_wait = median
+        res_new[addr] = {"count": count, "median_wait": median_wait}
+    return res_new, requests_raw

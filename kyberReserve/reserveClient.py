@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import logging
 import urllib.parse
+from datetime import timedelta
 from functools import wraps
 from time import time
 from timeit import default_timer as timer
@@ -18,6 +19,9 @@ from kyberReserve.utils import (
     AuthenticationData,
     convert_float_to_twei,
     convert_rate_to_binance,
+    dates_gen,
+    dt_ts_milis,
+    str_to_dtime,
     ts_millis,
 )
 
@@ -645,7 +649,7 @@ class ReserveClient:
         from_time=ts_millis() - 86400 * 1000,
         to_time=ts_millis(),
         action="quote",
-    ):
+    ) -> list[dict[str, Any]]:
         print(from_time, to_time, type(from_time), type(to_time))
         time_unit_to_split_requests_ms = 3600_000
         endpoint = self.endpoints["0x_activity_logs"].full_path()
@@ -661,8 +665,87 @@ class ReserveClient:
             self._requestGET_retry(endpoint, params, quote_logs)
         return quote_logs
 
+    def get_quotes(
+        self, from_time: int, to_time: int, cut: int = 2, verbose: bool = False
+    ) -> list[dict[str, Any]]:
+        """Get RFQs for 0x, Paraswap, Hashflow. See also `get_all_quotes` for a more
+        convenient way to get quotes."""
+        params = {
+            "type": "quote",
+            "fromTime": from_time,
+            "toTime": to_time,
+            "cut": cut,
+        }
+        resp_with_stats = response_stats(self.requestGET)
+        resp = resp_with_stats(
+            self.endpoints["0x_activity_logs"].full_path(), params=params, timeout=120
+        )
+        rfqs = []
+        stats = (
+            {"fromTime": params["fromTime"], "toTime": params["toTime"]}
+            if verbose
+            else {}
+        )
+        if "success" in resp.keys():
+            reply = resp["success"]
+            if verbose:
+                stats["success"] = True
+                print(resp["stats"] | stats)
+            rfqs = sorted(reply["data"], key=lambda d: d["id"])
+        else:
+            # stats["success"] = False
+            msg = f"Request failed for [{from_time}, {to_time}], with: {resp['failed']}"
+            raise ValueError(msg)
+        return rfqs
+
+    def get_all_quotes(
+        self, start_dt: str, end_dt: str, step: timedelta, verbose: bool = False
+    ) -> list[dict[str, Any]]:
+        """Get quote logs for 0x, paraswap, hashflow RFQs, using the given time range
+        and step.
+        Args:
+            start_dt: start date-time in format: "DD-MM-DD HH:MM:SS"
+            end_dt: end date-time in format: "YYYY-MM-DD HH:MM:SS"
+            tep: time step in hours or minutes or else
+            verbose: print progress
+        Example:
+            start_dt = "15/2/24 13:00:00.0+00:00"
+            end_dt = "15/2/24 15:25:59.999+00:00"
+            q_logs =  get_all_quotes(start_dt, end_dt, timedelta(hours=3))
+        Returns:
+            list of quote logs
+        """
+        from_time = str_to_dtime(start_dt)
+        to_time = str_to_dtime(end_dt)
+        almost_step = step - timedelta(seconds=0.001)
+        rfqs = []
+        _timer_start_run = timer()
+        for date in dates_gen(step, from_time, to_time):
+            _rfqs = self.get_quotes(dt_ts_milis(date), dt_ts_milis(date + almost_step))
+            rfqs += _rfqs
+            if verbose:
+                print(f"{date}, rfqs number: {len(_rfqs)}")
+        if verbose:
+            _timer_end_run = timer()
+            # _dt_finished = datetime.now()
+            print(
+                f"Download took: {timedelta(seconds=_timer_end_run - _timer_start_run)}"
+            )
+            # print(f"Finished at: {_dt_finished}")
+        return rfqs
+
     def blacklist_0x_get(self) -> dict[str, Any]:
         return self.requestGET(self.endpoints["0x_blacklist"].full_path())
+
+    def get_banned_addresses(self) -> list[str]:
+        """Get only banned addresses from the 0x blacklist data."""
+        try:
+            banned = self.blacklist_0x_get()["success"]["data"]
+        except KeyError as e:
+            lgr.error(f"Cannot get banned addresses - KeyError: {e}")
+            return []
+        banned_addr = [a["address"] for a in banned]
+        return [i.lower() for i in banned_addr]
 
     def blacklist_0x_set(
         self, list_of_addresses_and_desc: list, list_type="add"
