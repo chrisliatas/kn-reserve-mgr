@@ -10,14 +10,18 @@ from .asyncReserveTools import (
     fetch_url,
 )
 from .endpoints import ReserveEndpoints
+from .etherscanClient import EtherScanClient, RelationDirection
 from .reserveClient import ReserveClient
+from .storage import Block, Transaction
 from .utils import AuthContext, AuthenticationData
 
 __all__ = [
     "analysis",
-    "asyncReserveTools",
-    "reserveClient",
-    "utils",
-    "tokens",
     "endpoints",
+    "asyncReserveTools",
+    "etherscanClient",
+    "reserveClient",
+    "storage",
+    "tokens",
+    "utils",
 ]

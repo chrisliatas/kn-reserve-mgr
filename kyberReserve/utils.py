@@ -1,4 +1,5 @@
 import json
+import os
 from enum import Enum
 from time import time
 
@@ -13,6 +14,10 @@ class AuthContext(Enum):
 
 def ts_millis():
     return int(time() * 1000)
+
+
+def wei_to_eth(wei: int) -> float:
+    return wei / 1e18
 
 
 def load_json_file(key_file: str):
@@ -109,3 +114,26 @@ def convert_rate_to_binance(
             in_currency,
             out_currency,
         )
+
+
+def saveEveryNth(results: list, filename: str, nRes: int) -> bool:
+    saved = False
+    if (n_res := len(results)) >= nRes:
+        if os.path.exists(filename):
+            try:
+                with open(filename, "r") as infile:
+                    res = json.load(infile)
+                    res += results
+            except json.decoder.JSONDecodeError as der:
+                print(f"Decoder error {der}")
+                res = results
+            with open(filename, "w") as outfile:
+                json.dump(res, outfile)
+            print(f"Saved {len(res)} results")
+            saved = True
+        else:
+            with open(filename, "w") as outfile:
+                json.dump(results, outfile)
+            print(f"Saved {n_res} results")
+            saved = True
+    return saved
