@@ -213,7 +213,7 @@ class EtherScanClient:
         self._resp = requests.get(url)
         return self._parse_resp()
 
-    def _logs(
+    def get_logs(
         self,
         address: str,
         topics: dict[str, str] | None = None,
@@ -255,8 +255,8 @@ class EtherScanClient:
                 if topicOperator:
                     for t_nums, op in topicOperator.items():
                         params[t_nums] = op
-            else:
-                print("Need to specify topicOperator for multiple topics")
+                else:
+                    print("Need to specify topicOperator for multiple topics")
         return self._paginate_or_not("logs", "getLogs", params, True)
 
     def _paginate_or_not(
