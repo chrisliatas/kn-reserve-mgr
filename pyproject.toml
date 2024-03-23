@@ -4,6 +4,10 @@ version = "0.1.0"
 description = "Tools for access, management and analysis for Kyber Reserve"
 authors = ["Chris Liatas <chris@liatas.com>"]
 readme = "README.md"
+packages = [
+    { include = "kyberReserve" },
+    { include = "kyberReserve/**/*.py" },
+]
 
 [tool.poetry.dependencies]
 python = "^3.11"
