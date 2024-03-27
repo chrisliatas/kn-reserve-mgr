@@ -332,6 +332,41 @@ class ReserveClient:
                 exchanges[e][np] = new_pairs[np]
         return tokens, exchanges, tokens_addr, tokens_decimals
 
+    def get_RFQ_params(self, incl_disabled: bool = True) -> dict[str, Any]:
+        """Get tokens RFQ params after migration to new format."""
+        t_params = {}
+        resp = self.get_asset_info(incl_disabled)
+        assets = resp.get("success")
+        if not assets:
+            raise BaseException(f"cannot get `asset_info` {resp}")
+        for i in assets["data"]:
+            id = i["id"]
+            symbol = i["symbol"]
+            exch = i["rfq_params_base"]
+            enabled = exch["enabled"]
+            if not enabled and not incl_disabled:
+                continue
+            data = {
+                "a": exch["a"],
+                "b": exch["b"],
+                "c": exch["c"],
+                "max_sell": exch["max_eth_size_sell"],
+                "max_buy": exch["max_eth_size_buy"],
+                "min_min": exch["min_min"],
+                "ref_eth_amount": exch["ref_eth_amount"],
+                "step_multiplier": exch["step_multiplier"],
+                "ask_offset": exch["ask_offset"] if "ask_offset" in exch else 0,
+                "bid_offset": exch["bid_offset"] if "bid_offset" in exch else 0,
+                "enabled": enabled,
+                "transfer_gas": exch["transfer_gas"] if "transfer_gas" in exch else 0,
+                "id": id,
+                "symbol": symbol,
+                "target_total": i["target"]["total"],
+            }
+            t_params[id] = data
+            t_params[symbol] = data
+        return t_params
+
     def get_0x_price(
         self,
         token_in: str,
