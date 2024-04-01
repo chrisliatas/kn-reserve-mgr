@@ -80,6 +80,12 @@ class ReserveClient:
             self.tokens_decimals,
         ) = self.get_tokens_exchanges_from_asset_info()
 
+    def get_assetID(self, asset: str) -> int:
+        return self.tokens.get(asset, 0)
+
+    def get_decimals(self, asset: str) -> int:
+        return self.tokens_decimals.get(asset, 0)
+
     def sign(
         self,
         request: PreparedRequest,
@@ -243,6 +249,18 @@ class ReserveClient:
         except KeyError as e:
             return {"failed": f"KeyError - {e}"}
 
+    def get_currentBalance(self, assetID: int) -> float:
+        """Get current balance for the given assetID."""
+        balances = self.get_balances()
+        if "failed" in balances:
+            return 0.0
+        balance_i: dict[str, Any] = {}
+        for i in balances:
+            if i["asset_id"] == assetID:
+                balance_i = i
+                break
+        return balance_i["exchanges"][0]["available"] + balance_i["reserve"]
+
     def get_asset_info(self, incl_disabled: bool = True) -> dict[str, Any]:
         endpoint = self.endpoints["v3_asset"].full_path(dict(include_disabled=True))
         if not incl_disabled:
@@ -265,6 +283,17 @@ class ReserveClient:
         return self.requestGET(
             self.endpoints["0x_current-pricing"].full_path(), params=params
         )
+
+    def get_asset_rate(self, assetID: int) -> dict[str, Any]:
+        asset_rate = {}
+        analytic_rate = self.get_analytic_rate()
+        if not (analytic_rate.get("success") and "data" in analytic_rate["success"]):
+            return asset_rate
+        for i in analytic_rate["success"]["data"]:
+            if i["asset"] == assetID:
+                asset_rate = i
+                break
+        return asset_rate
 
     def get_0x_levels(self, params: dict | None = None) -> dict[str, Any]:
         return self.requestGET(self.endpoints["0x_levels"].full_path(), params=params)
