@@ -351,7 +351,7 @@ def get_tokenPricing(
     current_bal = kr.get_currentBalance(assetID)
     bal_dict = dict(current=current_bal, target=totalTarget)
     if pricing_debug is None:
-        pricing_debug = kr.get_asset_rate(assetID)
+        pricing_debug = kr.get_asset_pricing(assetID)
     # assetDecimal = get_decimals(asset)
     ethDecimal = kr.get_decimals(asset)
     # `mtx` contains prices, `dbg` contains imbalances

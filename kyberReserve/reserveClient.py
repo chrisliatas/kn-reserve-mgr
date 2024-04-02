@@ -279,16 +279,25 @@ class ReserveClient:
             )
         return resp
 
-    def get_analytic_rate(self, params: dict | None = None) -> dict[str, Any]:
+    def get_pricing_details(self, params: dict | None = None) -> dict[str, Any]:
+        """Get pricing details for reserve. Previously known as `get_analytic_rate`."""
         return self.requestGET(
             self.endpoints["0x_current-pricing"].full_path(), params=params
         )
 
-    def get_asset_rate(self, assetID: int) -> dict[str, Any]:
-        asset_rate = {}
-        analytic_rate = self.get_analytic_rate()
-        if not (analytic_rate.get("success") and "data" in analytic_rate["success"]):
-            return asset_rate
+    def get_asset_pricing(
+        self, assetID: int, all_rates: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """Get rate for the given assetID. If `all_rates` is None, get all rates first.
+        `all_rates` should be the response from `get_pricing_details`."""
+        asset_rate: dict[str, Any] = {}
+        analytic_rate = all_rates
+        if not analytic_rate:
+            analytic_rate = self.get_pricing_details()
+            if not (
+                analytic_rate.get("success") and "data" in analytic_rate["success"]
+            ):
+                return asset_rate
         for i in analytic_rate["success"]["data"]:
             if i["asset"] == assetID:
                 asset_rate = i
@@ -899,10 +908,69 @@ class ReserveClient:
             self.endpoints["price-volatility_prices"].full_path(), params=params
         )
 
-    def get_volatility(self, pairs: str) -> dict[str, Any]:
-        params = {"pairs": pairs}
+    def get_volatility(self, pairs: list[str]) -> dict[str, Any]:
+        """Get volatility for the given pairs. Returns fixed params volatility. For
+        custom params use `get_custom_volatility`."""
+        params = {"pairs": ",".join(pairs)}
         return self.requestGET(
             self.endpoints["price-volatility_price-volatility"].full_path(),
+            params=params,
+        )
+
+    def get_custom_volatility(
+        self,
+        pairs: list[str],
+        samples_size: int,
+        sample_interval: int,
+        target_period: int,
+        weight: float,
+        ddof: int = 1,
+    ) -> dict[str, Any]:
+        """Get custom (weighted) volatility for the given pairs.
+        Args:
+            pairs: list of pairs, eg. ["ETH-USDT", "BTC-USDT"]
+            samples_size:  This parameter specifies the number of samples for each
+                sampling interval.
+            sample_interval: Raw price data are sampled per 1 sec. This is the window
+                size (in seconds) for the sampling.
+            target_period: This is the period for which the volatility is calculated.
+            weight: Lambda parameter for exponential weighting.
+            ddof: Degrees of freedom for the standard deviation calculation.
+                Default is 1.
+        Example:
+            get_custom_volatility(["ETH-USDT", "BTC-USDT"], 21, 15, 45, 0.95), will
+            return the 45 sec volatility for the given pairs, sampled every 15 sec, for
+            21 samples, with a weight of 0.95. So, it is 45sec volatility for the last
+            300 sec (5 min).
+        Response example:
+            {
+                "success": true,
+                "data": [
+                    {
+                    "pair": "ETH-USDT",
+                    "extrapolate_value": 0.05704396204193875,
+                    "timestamp": 1700117743375,
+                    "mean": 14.897714285714285
+                    },
+                    {
+                    "pair": "BTC-USDT",
+                    "extrapolate_value": 0.00028899507502396095,
+                    "timestamp": 1700117743375,
+                    "mean": 0.22533668113798677
+                    }
+                ]
+            }
+        """
+        params = {
+            "pairs": ",".join(pairs),
+            "sample_number": samples_size,
+            "sample_interval_sec": sample_interval,
+            "period_sec": target_period,
+            "weight": weight,
+            "ddof": ddof,
+        }
+        return self.requestGET(
+            self.endpoints["price-volatility_custom-volatility"].full_path(),
             params=params,
         )
 
