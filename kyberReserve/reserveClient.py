@@ -899,13 +899,15 @@ class ReserveClient:
                     )
         return result
 
-    def get_vol_prices(
-        self, symbol: str, from_ts: int, to_ts: int, interval: int
+    def get_past_prices(
+        self, symbols: list[str], from_ts: int, to_ts: int, interval: int | None = None
     ) -> dict[str, Any]:
-        """Get volatility and prices for a symbol."""
-        params = {"symbol": symbol, "from": from_ts, "to": to_ts, "interval": interval}
+        """Get historic prices for a symbol or multiple symbols. Prices are in USDT."""
+        params = {"symbols": ",".join(symbols), "from": from_ts, "to": to_ts}
+        if interval:
+            params["interval"] = interval
         return self.requestGET(
-            self.endpoints["price-volatility_prices"].full_path(), params=params
+            self.endpoints["price-volatility_price"].full_path(), params=params
         )
 
     def get_volatility(self, pairs: list[str]) -> dict[str, Any]:
