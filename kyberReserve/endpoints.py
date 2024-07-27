@@ -7,6 +7,7 @@ from typing import Any
 class EndpointItem:
     path: str
     base: str
+    sub_base: str
     url: str
     methods: list[str]
     options: dict[str, str]
@@ -14,7 +15,10 @@ class EndpointItem:
     description: str
 
     def full_path(self, options: dict[str, Any] | None = None) -> str:
-        path = f"{self.base}/{self.path}"
+        if self.sub_base:
+            path = f"{self.base}/{self.sub_base}/{self.path}"
+        else:
+            path = f"{self.base}/{self.path}"
         if options:
             path += "?" + "&".join([f"{k}={v}" for k, v in options.items()])
         return path
@@ -25,12 +29,15 @@ class EndpointItem:
 
     @property
     def host_base(self) -> str:
+        if self.sub_base:
+            return f"{self.url}/{self.base}/{self.sub_base}"
         return f"{self.url}/{self.base}"
 
     def to_dict(self) -> dict:
         return {
             "path": self.path,
             "base": self.base,
+            "sub_base": self.sub_base,
             "url": self.url,
             "methods": self.methods,
             "options": self.options,
@@ -39,8 +46,12 @@ class EndpointItem:
         }
 
     def __repr__(self) -> str:
+        if self.sub_base:
+            base_path = f"{self.base}/{self.sub_base}/{self.path}"
+        else:
+            base_path = f"{self.base}/{self.path}"
         return (
-            f"EndpointItem({self.base}/{self.path}, {self.url}, {self.methods}, "
+            f"EndpointItem({base_path}, {self.url}, {self.methods}, "
             f"{self.options}, {self.params}, {self.description})"
         )
 
@@ -55,14 +66,16 @@ def load_endpoints(endpoints_json: str) -> dict[str, EndpointItem]:
             url = i.get("url", "")
             for j in i["endpoints"]:
                 path = j["path"]
+                sub_base = j.get("sub_base", "")
                 methods = j["methods"]
                 options = j.get("options", {})
                 params = j.get("params", {})
                 description = j["description"]
                 item = EndpointItem(
-                    path, base, url, methods, options, params, description
+                    path, base, sub_base, url, methods, options, params, description
                 )
-                endpoints[f"{base}_{path}"] = item
+                ep_key = f"{base}_{sub_base}_{path}" if sub_base else f"{base}_{path}"
+                endpoints[ep_key] = item
     return endpoints
 
 

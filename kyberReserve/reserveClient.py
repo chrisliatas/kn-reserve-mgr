@@ -261,11 +261,11 @@ class ReserveClient:
                 break
         return balance_i["exchanges"][0]["available"] + balance_i["reserve"]
 
-    def get_asset_info(self, incl_disabled: bool = True) -> dict[str, Any]:
-        endpoint = self.endpoints["v3_asset"].full_path(dict(include_disabled=True))
-        if not incl_disabled:
-            endpoint = self.endpoints["v3_asset"].full_path()
-        return self.requestGET(endpoint)
+    def get_asset_info(
+        self, asset_type: str = "all", incl_disabled: bool = True
+    ) -> dict[str, Any]:
+        params = {"asset_type": asset_type, "include_disabled": incl_disabled}
+        return self.requestGET(self.endpoints["v3_asset"].full_path(), params=params)
 
     def get_0x_rate(self, params: dict) -> dict[str, Any]:
         return self.requestGET(self.endpoints["0x_quote"].full_path(), params=params)
@@ -975,6 +975,25 @@ class ReserveClient:
             self.endpoints["price-volatility_custom-volatility"].full_path(),
             params=params,
         )
+
+    def multi_integration_volatility(self, pairs: list[str]) -> dict[str, Any]:
+        """Get volatility for the given pairs for multiple integrations.
+        Returns fixed params volatility.
+        Args:
+            pairs: list of pairs, eg. ["ETH-USDT", "BTC-USDT"]
+        """
+        # pairs must be in the format 1-7, where 1 is the base and 7 is the quote
+        _pairs = []
+        for pair in pairs:
+            base, quote = pair.split("-")
+            # get asset number
+            base = self.tokens[base]
+            quote = self.tokens[quote]
+            _pairs.append(f"{base}-{quote}")
+        params = {"pairs": ",".join(_pairs)}
+        lgr.debug(f"ReserveClient - multi_integration_volatility: pairs {params}")
+        ep = "price-volatility_price-volatility_multiple-integration"
+        return self.requestGET(self.endpoints[ep].full_path(), params=params)
 
     def m_t_m(self, base: str, quote: str, timestamp_sec: int | None = None) -> float:
         if base == "WETH":
