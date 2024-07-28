@@ -59,6 +59,7 @@ class ReserveClient:
         key_file: str,
         authContext: AuthContext,
         endpoints_json: str,
+        incl_disabled: bool = True,
         timeout: int = 60,
     ) -> None:
         """Initialize Reserve API client.
@@ -78,7 +79,7 @@ class ReserveClient:
             self.exchanges,
             self.tokens_addr,
             self.tokens_decimals,
-        ) = self.get_tokens_exchanges_from_asset_info()
+        ) = self.get_tokens_exchanges_from_asset_info(incl_disabled=incl_disabled)
 
     def get_assetID(self, asset: str) -> int:
         return self.tokens.get(asset, 0)
@@ -323,7 +324,7 @@ class ReserveClient:
     def get_tokens_exchanges_from_asset_info(
         self, incl_disabled: bool = True, incl_WETH: bool = True
     ) -> tuple[dict, dict, dict, dict]:
-        resp = self.get_asset_info(incl_disabled)
+        resp = self.get_asset_info(incl_disabled=incl_disabled)
         assets = resp.get("success")
         if not assets:
             raise BaseException(f"cannot get asset info {resp}")
@@ -976,7 +977,9 @@ class ReserveClient:
             params=params,
         )
 
-    def multi_integration_volatility(self, pairs: list[str]) -> dict[str, Any]:
+    def multi_integration_volatility(
+        self, pairs: list[str], all_tokens: dict[Any, Any] | None = None
+    ) -> dict[str, Any]:
         """Get volatility for the given pairs for multiple integrations.
         Returns fixed params volatility.
         Args:
@@ -984,11 +987,12 @@ class ReserveClient:
         """
         # pairs must be in the format 1-7, where 1 is the base and 7 is the quote
         _pairs = []
+        tokens = all_tokens if all_tokens else self.tokens
         for pair in pairs:
             base, quote = pair.split("-")
             # get asset number
-            base = self.tokens[base]
-            quote = self.tokens[quote]
+            base = tokens[base]
+            quote = tokens[quote]
             _pairs.append(f"{base}-{quote}")
         params = {"pairs": ",".join(_pairs)}
         lgr.debug(f"ReserveClient - multi_integration_volatility: pairs {params}")
