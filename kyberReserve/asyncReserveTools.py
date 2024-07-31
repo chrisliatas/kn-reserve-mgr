@@ -142,6 +142,7 @@ async def fetch_url(request: RequestItem, timeout: int = 60) -> dict:
     url = request.url
     if request.hasSecret:
         request.sign()
+    lgr.debug(f"fetch_url - Fetching: {url}")
     try:
         session_timeout = aiohttp.ClientTimeout(
             total=None, sock_connect=timeout, sock_read=timeout
@@ -274,7 +275,15 @@ class ContextSignedRequest:
                         p["time"] = ts
                         reqs.append(self.get(endpoint, p))
                         mtm.append(p.copy())
-        responses = await fetch_all_urls(reqs)
+        # if len(reqs) > 10, then send in batches of 10
+        if (n_reqs := len(reqs)) > 10:
+            print(f"Fetching {n_reqs} requests in batches of 10")
+            responses = []
+            for i in range(0, n_reqs, 10):
+                print(f"Fetching {i} to {i+10} of {n_reqs}")
+                responses += await fetch_all_urls(reqs[i : i + 10])
+        else:
+            responses = await fetch_all_urls(reqs)
         self.host = temp_host
         for i, resp in enumerate(responses):
             if "success" in resp.keys() and "success" in resp["success"].keys():
