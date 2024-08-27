@@ -927,7 +927,8 @@ class ReserveClient:
         sample_interval: int,
         target_period: int,
         weight: float,
-        ddof: int = 1,
+        ddof: int = 0,
+        target_adjust: float = 1.0,
     ) -> dict[str, Any]:
         """Get custom (weighted) volatility for the given pairs.
         Args:
@@ -940,6 +941,7 @@ class ReserveClient:
             weight: Lambda parameter for exponential weighting.
             ddof: Degrees of freedom for the standard deviation calculation.
                 Default is 1.
+            target_adjust: Adjust the target period to reduce the volatility value.
         Example:
             get_custom_volatility(["ETH-USDT", "BTC-USDT"], 21, 15, 45, 0.95), will
             return the 45 sec volatility for the given pairs, sampled every 15 sec, for
@@ -971,6 +973,7 @@ class ReserveClient:
             "period_sec": target_period,
             "weight": weight,
             "ddof": ddof,
+            "target_adjust": target_adjust,
         }
         return self.requestGET(
             self.endpoints["price-volatility_custom-volatility"].full_path(),
@@ -1028,3 +1031,15 @@ class ReserveClient:
                 f"stats: {resp['stats']}"
             )
         return mtm
+
+    def reserve_pnl_report(self, start_ts: int, end_ts: int) -> dict[str, Any]:
+        """Get PnL report for the given time range
+        Args:
+            start_ts: start timestamp in seconds
+            end_ts: end timestamp in seconds
+        Returns:
+            dict: success or failed, if success, the value in the the response object.
+            The successful response object contains the pnl report in text format."""
+        params = {"from": start_ts, "to": end_ts}
+        url = self.endpoints["mmalert_reserve_pnl"].full_url()
+        return self.requestGET_url(url, params=params, timeout=10)
