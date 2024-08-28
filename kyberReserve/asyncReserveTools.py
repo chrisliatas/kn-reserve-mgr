@@ -238,17 +238,20 @@ class ContextSignedRequest:
         base: list[str],
         quote: list[str],
         ts_sec: int | list[int] | None = None,
+        ts_unique: bool = True,
     ) -> list[dict[str, Any]]:
-        """Get mark-to-market rates asynchronously."""
-        # replace WETH with ETH in base and quote
+        """Get mark-to-market rates asynchronously.
+        Use `ts_unique=True` to match each base-quote pair with a unique timestamp,
+        otherwise, all timestamps will be used for each pair."""
+        # replace all occurrences of deviating tokens base and quote
         if "WETH" in base:
-            base[base.index("WETH")] = "ETH"
+            base = ["ETH" if b == "WETH" else b for b in base]
         if "WETH" in quote:
-            quote[quote.index("WETH")] = "ETH"
+            quote = ["ETH" if q == "WETH" else q for q in quote]
         if "BEAM" in base:
-            base[base.index("BEAM")] = "BEAMX"
+            base = ["BEAMX" if b == "BEAM" else b for b in base]
         if "BEAM" in quote:
-            quote[quote.index("BEAM")] = "BEAMX"
+            quote = ["BEAMX" if q == "BEAM" else q for q in quote]
         # make array of params combining base and quote lists
         pairs = [(i, j) for i in base for j in quote if i != j]
         params: list[dict[str, Any]] = [dict(base=b, quote=q) for b, q in pairs]
@@ -261,7 +264,7 @@ class ContextSignedRequest:
         )
         reqs = []
         mtm = []
-        for p in params:
+        for idx, p in enumerate(params):
             if ts_sec is None:
                 reqs.append(self.get(endpoint, p))
                 mtm.append(p | {"time": None})
@@ -271,10 +274,15 @@ class ContextSignedRequest:
                     reqs.append(self.get(endpoint, p))
                     mtm.append(p)
                 else:
-                    for ts in ts_sec:
-                        p["time"] = ts
+                    if ts_unique:
+                        p["time"] = ts_sec[idx]
                         reqs.append(self.get(endpoint, p))
                         mtm.append(p.copy())
+                    else:
+                        for ts in ts_sec:
+                            p["time"] = ts
+                            reqs.append(self.get(endpoint, p))
+                            mtm.append(p.copy())
         # if len(reqs) > 10, then send in batches of 10
         if (n_reqs := len(reqs)) > 10:
             print(f"Fetching {n_reqs} requests in batches of 10")
