@@ -10,6 +10,7 @@ class EndpointItem:
     sub_base: str
     url: str
     methods: list[str]
+    secured: bool
     options: dict[str, str]
     params: dict[str, str]
     description: str
@@ -21,6 +22,8 @@ class EndpointItem:
             path = f"{self.base}/{self.path}"
         if options:
             path += "?" + "&".join([f"{k}={v}" for k, v in options.items()])
+        if path.startswith("/"):
+            path = path[1:]
         return path
 
     def full_url(self, options: dict[str, Any] | None = None) -> str:
@@ -29,9 +32,13 @@ class EndpointItem:
 
     @property
     def host_base(self) -> str:
-        if self.sub_base:
-            return f"{self.url}/{self.base}/{self.sub_base}"
-        return f"{self.url}/{self.base}"
+        if self.url and self.base:
+            if self.sub_base:
+                return f"{self.url}/{self.base}/{self.sub_base}"
+            return f"{self.url}/{self.base}"
+        if self.url:
+            return self.url
+        return ""
 
     def to_dict(self) -> dict:
         return {
@@ -40,16 +47,20 @@ class EndpointItem:
             "sub_base": self.sub_base,
             "url": self.url,
             "methods": self.methods,
+            "secured": self.secured,
             "options": self.options,
             "params": self.params,
             "description": self.description,
         }
 
     def __repr__(self) -> str:
-        if self.sub_base:
-            base_path = f"{self.base}/{self.sub_base}/{self.path}"
+        if self.base:
+            if self.sub_base:
+                base_path = f"{self.base}/{self.sub_base}/{self.path}"
+            else:
+                base_path = f"{self.base}/{self.path}"
         else:
-            base_path = f"{self.base}/{self.path}"
+            base_path = self.path
         return (
             f"EndpointItem({base_path}, {self.url}, {self.methods}, "
             f"{self.options}, {self.params}, {self.description})"
@@ -68,13 +79,27 @@ def load_endpoints(endpoints_json: str) -> dict[str, EndpointItem]:
                 path = j["path"]
                 sub_base = j.get("sub_base", "")
                 methods = j["methods"]
+                secured = j.get("secured", False)
                 options = j.get("options", {})
                 params = j.get("params", {})
                 description = j["description"]
                 item = EndpointItem(
-                    path, base, sub_base, url, methods, options, params, description
+                    path,
+                    base,
+                    sub_base,
+                    url,
+                    methods,
+                    secured,
+                    options,
+                    params,
+                    description,
                 )
-                ep_key = f"{base}_{sub_base}_{path}" if sub_base else f"{base}_{path}"
+                if base:
+                    ep_key = (
+                        f"{base}_{sub_base}_{path}" if sub_base else f"{base}_{path}"
+                    )
+                else:
+                    ep_key = path
                 endpoints[ep_key] = item
     return endpoints
 

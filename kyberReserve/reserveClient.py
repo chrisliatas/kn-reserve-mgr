@@ -143,6 +143,7 @@ class ReserveClient:
         params: Any | None = None,
         json: Any | None = None,
         timeout: int | None = None,
+        secured: bool = True,
     ) -> Response:
         custom_headers = {}
         if params and isinstance(params, dict) and "integration" in params:
@@ -156,9 +157,12 @@ class ReserveClient:
         req = Request(method, url, data=data, params=params, json=json)
         with requests.sessions.Session() as session:
             prep = session.prepare_request(req)
-            sreq = self.sign(prep)
-            for key, value in custom_headers.items():
-                sreq.headers[key] = value
+            if secured:
+                sreq = self.sign(prep)
+                for key, value in custom_headers.items():
+                    sreq.headers[key] = value
+            else:
+                sreq = prep
             # Send the request.
             send_kwargs = {
                 "timeout": timeout,
@@ -183,6 +187,7 @@ class ReserveClient:
                 params=params,
                 json=json,
                 timeout=timeout or self.timeout,
+                secured=True,
             )
             if resp.status_code == 200:
                 resp_data = resp.json()
@@ -231,10 +236,14 @@ class ReserveClient:
             timeout=timeout,
         )
 
-    def requestGET_url(self, url: str, params: dict, timeout: int) -> dict[str, Any]:
+    def requestGET_url(
+        self, url: str, params: dict, timeout: int, secured: bool = True
+    ) -> dict[str, Any]:
         """Used to request **out-of-context URL**."""
         try:
-            resp: Response = self._request("GET", url, params=params, timeout=timeout)
+            resp: Response = self._request(
+                "GET", url, params=params, timeout=timeout, secured=secured
+            )
             resp.raise_for_status()
         except Exception as ex:
             return {"failed": str(ex)}
@@ -908,7 +917,8 @@ class ReserveClient:
         if interval:
             params["interval"] = interval
         return self.requestGET(
-            self.endpoints["price-volatility_price"].full_path(), params=params
+            self.endpoints["price-volatility_price"].full_path(),
+            params=params,
         )
 
     def get_volatility(self, pairs: list[str]) -> dict[str, Any]:
@@ -1000,7 +1010,10 @@ class ReserveClient:
         params = {"pairs": ",".join(_pairs)}
         lgr.debug(f"ReserveClient - multi_integration_volatility: pairs {params}")
         ep = "price-volatility_price-volatility_multiple-integration"
-        return self.requestGET(self.endpoints[ep].full_path(), params=params)
+        return self.requestGET(
+            self.endpoints[ep].full_path(),
+            params=params,
+        )
 
     def m_t_m(self, base: str, quote: str, timestamp_sec: int | None = None) -> float:
         if base == "WETH":
@@ -1042,4 +1055,22 @@ class ReserveClient:
             The successful response object contains the pnl report in text format."""
         params = {"from": start_ts, "to": end_ts}
         url = self.endpoints["mmalert_reserve_pnl"].full_url()
-        return self.requestGET_url(url, params=params, timeout=10)
+        return self.requestGET_url(
+            url,
+            params=params,
+            timeout=10,
+            secured=self.endpoints["mmalert_reserve_pnl"].secured,
+        )
+
+    def get_general_tradelogs(
+        self, from_ts: int, to_ts: int, timeout: int = 30
+    ) -> dict[str, Any]:
+        """Get general trade logs for the given time range.
+        Timestamps are in seconds. There is a 24h limit for the time range."""
+        params = {"from_time": from_ts, "to_time": to_ts}
+        return self.requestGET_url(
+            self.endpoints["tradelogs"].full_url(),
+            params=params,
+            timeout=timeout,
+            secured=self.endpoints["tradelogs"].secured,
+        )
