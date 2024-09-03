@@ -1066,7 +1066,7 @@ class ReserveClient:
         self, from_ts: int, to_ts: int, timeout: int = 30
     ) -> dict[str, Any]:
         """Get general trade logs for the given time range.
-        Timestamps are in seconds. There is a 24h limit for the time range."""
+        Timestamps are in milliseconds. There is a 24h limit for the time range."""
         params = {"from_time": from_ts, "to_time": to_ts}
         return self.requestGET_url(
             self.endpoints["tradelogs"].full_url(),
