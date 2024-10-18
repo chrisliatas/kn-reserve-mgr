@@ -108,7 +108,7 @@ class RequestItem:
 
     def sign(self) -> None:
         if self._signed:
-            print(f"Already signed at {self.headers['nonce']}")
+            lgr.warning(f"Already signed at {self.headers['nonce']}")
             return
         if not self.secret or not self.key_id:
             raise Exception("Cannot sign request without a SECRET or KEY-ID.")
@@ -285,11 +285,12 @@ class ContextSignedRequest:
                             mtm.append(p.copy())
         # if len(reqs) > 10, then send in batches of 10
         if (n_reqs := len(reqs)) > 10:
-            print(f"Fetching {n_reqs} requests in batches of 10")
+            lgr.info(f"Fetching {n_reqs} requests in batches of 10")
             responses = []
             for i in range(0, n_reqs, 10):
-                print(f"Fetching {i} to {i+10} of {n_reqs}")
-                responses += await fetch_all_urls(reqs[i : i + 10])
+                end = min(i + 10, n_reqs)
+                lgr.info(f"Fetching {i} to {end} of {n_reqs}")
+                responses += await fetch_all_urls(reqs[i:end])
         else:
             responses = await fetch_all_urls(reqs)
         self.host = temp_host
@@ -298,13 +299,13 @@ class ContextSignedRequest:
                 try:
                     mtm[i]["rate"] = resp["success"]["data"]["rate"]
                 except KeyError:
-                    print(
+                    lgr.warning(
                         f"No rate for [{mtm[i]['base']}, {mtm[i]['quote']}, "
                         f"{mtm[i]['time']}], data: {resp}"
                     )
                     mtm[i]["rate"] = 0.0
             else:
-                print(
+                lgr.warning(
                     f"Request failed for [{mtm[i]['base']}, {mtm[i]['quote']}, "
                     f"{mtm[i]['time']}], with: {resp['failed']}"
                 )
