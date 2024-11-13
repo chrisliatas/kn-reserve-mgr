@@ -1054,13 +1054,36 @@ class ReserveClient:
             dict: success or failed, if success, the value in the the response object.
             The successful response object contains the pnl report in text format."""
         params = {"from": start_ts, "to": end_ts}
-        url = self.endpoints["mmalert_reserve_pnl"].full_url()
+        ep = self.endpoints["mmalert_reserve_pnl"]
         return self.requestGET_url(
-            url,
+            ep.full_url(),
             params=params,
             timeout=10,
-            secured=self.endpoints["mmalert_reserve_pnl"].secured,
+            secured=ep.secured,
         )
+
+    def fusion_promotees(self, chain_id: int | None = None) -> list[dict[str, Any]]:
+        """Get the list of fusion promotees. By default, it returns the list of all
+        fusion promotees. If `chain_id` is provided, it returns the list of fusion
+        promotees for the given chain."""
+        params = {"chain_id": chain_id} if chain_id else {}
+        ep = self.endpoints["tradelogs-v2-promotees_promotees"]
+        resp = self.requestGET_url(
+            ep.full_url(),
+            params=params,
+            timeout=10,
+            secured=ep.secured,
+        )
+        reply = Response()
+        if "success" in resp.keys():
+            reply = resp["success"]
+            try:
+                return reply.json()["data"]
+            except KeyError:
+                lgr.error(f"Cannot get fusion promotees, data: {reply.text}")
+        else:
+            lgr.error(f"Request failed, with: {resp['failed']}")
+        return []
 
     def get_general_tradelogs(
         self, from_ts: int, to_ts: int, timeout: int = 30
@@ -1068,9 +1091,10 @@ class ReserveClient:
         """Get general trade logs for the given time range.
         Timestamps are in milliseconds. There is a 24h limit for the time range."""
         params = {"from_time": from_ts, "to_time": to_ts}
+        ep = self.endpoints["tradelogs"]
         return self.requestGET_url(
-            self.endpoints["tradelogs"].full_url(),
+            ep.full_url(),
             params=params,
             timeout=timeout,
-            secured=self.endpoints["tradelogs"].secured,
+            secured=ep.secured,
         )
