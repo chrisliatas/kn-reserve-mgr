@@ -239,8 +239,9 @@ class ContextSignedRequest:
         quote: list[str],
         ts_sec: int | list[int] | None = None,
         ts_unique: bool = True,
+        make_combinations: bool = False,
     ) -> list[dict[str, Any]]:
-        """Get mark-to-market rates asynchronously.
+        """Get mark-to-market rates for multiple pairs asynchronously.
         Use `ts_unique=True` to match each base-quote pair with a unique timestamp,
         otherwise, all timestamps will be used for each pair."""
         # replace all occurrences of deviating tokens base and quote
@@ -253,8 +254,11 @@ class ContextSignedRequest:
         if "BEAM" in quote:
             quote = ["BEAMX" if q == "BEAM" else q for q in quote]
         # make array of params combining base and quote lists
-        pairs = [(i, j) for i in base for j in quote if i != j]
-        params: list[dict[str, Any]] = [dict(base=b, quote=q) for b, q in pairs]
+        if make_combinations:
+            pairs = [(i, j) for i in base for j in quote if i != j]
+            params: list[dict[str, Any]] = [dict(base=b, quote=q) for b, q in pairs]
+        else:
+            params = [dict(base=b, quote=q) for b, q in zip(base, quote) if b != q]
         temp_host = self.host
         self.host = self.endpoints["mark-to-market_rate"].host_base
         endpoint = (
