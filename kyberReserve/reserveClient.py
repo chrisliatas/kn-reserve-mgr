@@ -13,6 +13,15 @@ import requests.models
 from requests import PreparedRequest, Request, Response
 
 from kyberReserve.endpoints import ReserveEndpoints
+from kyberReserve.reserveTypes import (
+    AssetClass,
+    AssetGroupLinkType,
+    AssetGroupSettingType,
+    AssetGroupType,
+    AssetLinkType,
+    AssetType,
+    ChangeList,
+)
 from kyberReserve.tokens import kn_traded_full
 from kyberReserve.utils import (
     AuthContext,
@@ -59,6 +68,7 @@ class ReserveClient:
         key_file: str,
         authContext: AuthContext,
         endpoints_json: str,
+        get_data: bool = True,
         incl_disabled: bool = True,
         timeout: int = 60,
     ) -> None:
@@ -66,6 +76,8 @@ class ReserveClient:
         Args:
             key_file: path to json file with authentication data.
             authContext: context for authentication data.
+            endpoints_json: path to json file with endpoints.
+            get_data: if True, get tokens and exchanges data.
             timeout: timeout for requests. Default 60 seconds.
         """
         self.auth_data = AuthenticationData(key_file)
@@ -74,12 +86,18 @@ class ReserveClient:
         self.endpoints = ReserveEndpoints(endpoints_json).endpoints
         lgr.info(f"ReserveClient initialized with auth context: {self.auth_ctx}")
         self.timeout = timeout
-        (
-            self.tokens,
-            self.exchanges,
-            self.tokens_addr,
-            self.tokens_decimals,
-        ) = self.get_tokens_exchanges_from_asset_info(incl_disabled=incl_disabled)
+        if get_data:
+            (
+                self.tokens,
+                self.exchanges,
+                self.tokens_addr,
+                self.tokens_decimals,
+            ) = self.get_tokens_exchanges_from_asset_info(incl_disabled=incl_disabled)
+        else:
+            self.tokens = {}
+            self.exchanges = {}
+            self.tokens_addr = {}
+            self.tokens_decimals = {}
 
     def get_assetID(self, asset: str) -> int:
         return self.tokens.get(asset, 0)
@@ -250,7 +268,7 @@ class ReserveClient:
         return {"success": resp}
 
     def get_authdata(self) -> dict[str, Any]:
-        return self.requestGET(self.endpoints["v3_authdata"].full_path())
+        return self.requestGET(self.endpoints["core-v4_v4_authdata"].full_path())
 
     def get_balances(self) -> dict[str, Any]:
         resp = self.get_authdata()
@@ -272,10 +290,19 @@ class ReserveClient:
         return balance_i["exchanges"][0]["available"] + balance_i["reserve"]
 
     def get_asset_info(
-        self, asset_type: str = "all", incl_disabled: bool = True
+        self,
+        asset_class: AssetClass = AssetClass.ALL,
+        asset_type: AssetType = AssetType.ALL,
+        incl_disabled: bool = True,
     ) -> dict[str, Any]:
-        params = {"asset_type": asset_type, "include_disabled": incl_disabled}
-        return self.requestGET(self.endpoints["v3_asset"].full_path(), params=params)
+        params = {
+            "asset_class": asset_class,
+            "asset_type": asset_type,
+            "include_disabled": incl_disabled,
+        }
+        return self.requestGET(
+            self.endpoints["setting-v4_v4_asset"].full_path(), params=params
+        )
 
     def get_0x_rate(self, params: dict) -> dict[str, Any]:
         return self.requestGET(self.endpoints["0x_quote"].full_path(), params=params)
@@ -331,25 +358,30 @@ class ReserveClient:
         )
 
     def get_tokens_exchanges_from_asset_info(
-        self, incl_disabled: bool = True, incl_WETH: bool = True
+        self,
+        asset_class: AssetClass = AssetClass.ALL,
+        asset_type: AssetType = AssetType.ALL,
+        incl_disabled: bool = True,
+        incl_WETH: bool = True,
     ) -> tuple[dict, dict, dict, dict]:
-        resp = self.get_asset_info(incl_disabled=incl_disabled)
-        assets = resp.get("success")
+        # TODO: add support for asset_class and asset_type
+        resp = self.get_asset_info(asset_class, asset_type, incl_disabled)
+        assets = resp["success"].get("data")
         if not assets:
-            raise BaseException(f"cannot get asset info {resp}")
+            raise BaseException(f"cannot get asset info {resp['success']['reason']}")
         tokens = {}
-        exchanges = {}
+        exchanges = {}  # TODO: fix exchange extraction
         tokens_addr = {}
         tokens_decimals = {}
         # print(assets)
-        for i in assets["data"]:
+        for i in assets:
             if i["symbol"] not in tokens:
                 tokens[i["symbol"]] = i["id"]
                 tokens[i["id"]] = i["symbol"]
-                tokens_addr[i["symbol"]] = i["address"]
-                tokens_addr[i["address"]] = i["symbol"]
+                tokens_addr[i["symbol"]] = i["onchain_address"]
+                tokens_addr[i["onchain_address"]] = i["symbol"]
                 tokens_decimals[i["symbol"]] = i["decimals"]
-                tokens_decimals[i["address"]] = i["decimals"]
+                tokens_decimals[i["onchain_address"]] = i["decimals"]
                 if "exchanges" in i:
                     for _ in i["exchanges"]:
                         if _["exchange_id"] not in exchanges:
@@ -384,10 +416,10 @@ class ReserveClient:
         """Get tokens RFQ params after migration to new format."""
         t_params = {}
         resp = self.get_asset_info(incl_disabled)
-        assets = resp.get("success")
+        assets = resp["success"].get("success")
         if not assets:
-            raise BaseException(f"cannot get `asset_info` {resp}")
-        for i in assets["data"]:
+            raise BaseException(f"cannot get `asset_info` {resp['success']['reason']}")
+        for i in assets:
             id = i["id"]
             symbol = i["symbol"]
             exch = i["rfq_params_base"]

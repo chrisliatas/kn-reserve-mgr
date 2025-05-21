@@ -13,6 +13,15 @@ from .asyncReserveTools import (
 from .endpoints import ReserveEndpoints
 from .etherscanClient import EtherScanClient, RelationDirection
 from .reserveClient import ReserveClient
+from .reserveTypes import (
+    AssetClass,
+    AssetGroupLinkType,
+    AssetGroupSettingType,
+    AssetGroupType,
+    AssetLinkType,
+    AssetType,
+    ChangeList,
+)
 from .storage import Block, Transaction
 from .utils import AuthContext, AuthenticationData
 
