@@ -357,6 +357,14 @@ class ReserveClient:
             self.endpoints["rfq_current-base-pricing"].full_path(), params=params
         )
 
+    def get_rfq_order_info(self, orderHash: str) -> dict[str, Any]:
+        """Get RFQ order information by order hash."""
+        params = {"orderHash": orderHash}
+        return self.requestGET(
+            self.endpoints["rfq_order-info"].full_path(),
+            params=params,
+        )
+
     def get_tokens_exchanges_from_asset_info(
         self,
         asset_class: AssetClass = AssetClass.ALL,
