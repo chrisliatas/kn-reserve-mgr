@@ -905,7 +905,13 @@ class ReserveClient:
         if list_type == "add":
             payload: list[dict[str, Any]] = []
             for addr, desc, exp in list_of_addresses_and_desc:
-                payload.append({"a": addr, "d": desc, "e": exp if exp else 0})
+                payload.append(
+                    {
+                        "address": addr,
+                        "description": desc,
+                        "expire_at": exp if exp else 0,
+                    }
+                )
             return self.requestPOST(endpoint, json=payload)
 
         # remove: send array of addresses
