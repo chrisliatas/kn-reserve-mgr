@@ -254,6 +254,23 @@ class ReserveClient:
             timeout=timeout,
         )
 
+    def requestDELETE(
+        self,
+        endpoint: str,
+        data: Any | None = None,
+        params: Any | None = None,
+        json: Any | None = None,
+        timeout: int | None = None,
+    ) -> dict[str, Any]:
+        return self.request(
+            "DELETE",
+            endpoint,
+            data=data,
+            params=params,
+            json=json,
+            timeout=timeout,
+        )
+
     def requestGET_url(
         self, url: str, params: dict, timeout: int, secured: bool = True
     ) -> dict[str, Any]:
@@ -857,39 +874,46 @@ class ReserveClient:
             # print(f"Finished at: {_dt_finished}")
         return rfqs
 
-    def blacklist_0x_get(self) -> dict[str, Any]:
-        return self.requestGET(self.endpoints["0x_blacklist"].full_path())
+    def blacklist_get(self) -> dict[str, Any]:
+        return self.requestGET(
+            self.endpoints["setting-v4_v4_blacklist-addr"].full_path()
+        )
 
     def get_banned_addresses(self) -> list[str]:
         """Get only banned addresses from the 0x blacklist data."""
         try:
-            banned = self.blacklist_0x_get()["success"]["data"]
+            banned = self.blacklist_get()["success"]["data"]
         except KeyError as e:
             lgr.error(f"Cannot get banned addresses - KeyError: {e}")
             return []
-        banned_addr = [a["address"] for a in banned]
+        banned_addr = [a["a"] for a in banned]
         return [i.lower() for i in banned_addr]
 
-    def blacklist_0x_set(
+    def blacklist_set(
         self, list_of_addresses_and_desc: list, list_type="add"
     ) -> dict[str, Any]:
         """
-        :param list_of_addresses_and_desc: [[address1, desc1],...,[addressN, descN]]
+        :param list_of_addresses_and_desc:
+            [[address1, desc1, exp1],...,[addressN, descN, expN]]
         :param list_type: "add" adds, "remove" removes
-        :return:
+        Expire time is in milliseconds since epoch. 0 means no expiration.
+        Example: [["0xabc...", "malicious", 1700000000000],
         """
         if list_type not in ["add", "remove"]:
             return {"failed": "list_type must be 'add' or 'remove'"}
-        endpoint = self.endpoints["0x_blacklist"].full_path()
-        params: dict[str, list] = {}
-        params[list_type] = []
+        endpoint = self.endpoints["setting-v4_v4_blacklist-addr"].full_path()
         if list_type == "add":
-            for add, desc in list_of_addresses_and_desc:
-                bl = {"address": add, "description": desc}
-                params[list_type].append(bl)
-        else:
-            params[list_type] = list_of_addresses_and_desc
-        return self.requestPOST(endpoint, json=params)
+            payload: list[dict[str, Any]] = []
+            for addr, desc, exp in list_of_addresses_and_desc:
+                payload.append({"a": addr, "d": desc, "e": exp if exp else 0})
+            return self.requestPOST(endpoint, json=payload)
+
+        # remove: send array of addresses
+        addrs = [
+            (item if isinstance(item, str) else item[0])
+            for item in list_of_addresses_and_desc
+        ]
+        return self.requestDELETE(endpoint, json=addrs)
 
     def whitelist_0x_get(self) -> dict[str, Any]:
         return self.requestGET(self.endpoints["0x_whitelist"].full_path())
