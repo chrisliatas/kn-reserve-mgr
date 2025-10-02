@@ -321,6 +321,60 @@ class ReserveClient:
             self.endpoints["setting-v4_v4_asset"].full_path(), params=params
         )
 
+    def get_asset_link(
+        self,
+        asset_link_type: AssetLinkType = AssetLinkType.ALL,
+        incl_disabled: bool = True,
+    ) -> dict[str, Any]:
+        """Get asset link data."""
+        params = {"asset_link_type": asset_link_type, "include_disabled": incl_disabled}
+        return self.requestGET(
+            self.endpoints["setting-v4_v4_asset-link"].full_path(), params=params
+        )
+
+    def get_asset_group(
+        self,
+        asset_group_type: AssetGroupType = AssetGroupType.ALL,
+        incl_disabled: bool = True,
+    ) -> dict[str, Any]:
+        """Get asset group data."""
+        params = {
+            "asset_group_type": asset_group_type,
+            "include_disabled": incl_disabled,
+        }
+        return self.requestGET(
+            self.endpoints["setting-v4_v4_asset-group"].full_path(), params=params
+        )
+
+    def get_asset_group_link(
+        self,
+        asset_group_link_type: AssetGroupLinkType = AssetGroupLinkType.ALL,
+        incl_disabled: bool = True,
+    ) -> dict[str, Any]:
+        """Get asset group link data."""
+        params = {
+            "asset_group_link_type": asset_group_link_type,
+            "include_disabled": incl_disabled,
+        }
+        return self.requestGET(
+            self.endpoints["setting-v4_v4_asset-group-link"].full_path(), params=params
+        )
+
+    def get_asset_group_setting(
+        self,
+        asset_group_setting_type: AssetGroupSettingType = AssetGroupSettingType.ALL,
+        incl_disabled: bool = True,
+    ) -> dict[str, Any]:
+        """Get asset group setting data."""
+        params = {
+            "asset_group_setting_type": asset_group_setting_type,
+            "include_disabled": incl_disabled,
+        }
+        return self.requestGET(
+            self.endpoints["setting-v4_v4_asset-group-setting"].full_path(),
+            params=params,
+        )
+
     def get_0x_rate(self, params: dict) -> dict[str, Any]:
         return self.requestGET(self.endpoints["0x_quote"].full_path(), params=params)
 
@@ -569,7 +623,7 @@ class ReserveClient:
         # buy rate
         resp = self.get_0x_price("WETH", token, eth_amount, integration=integration)
         if not (b_r := resp.get("success")):
-            print(f"missing buy rate")
+            print("missing buy rate")
             return
         # print(b_r)
         buy_amount = (
@@ -580,7 +634,7 @@ class ReserveClient:
         # sell rate
         resp = self.get_0x_price(token, "WETH", buy_amount / 10**t_decimals)
         if not (s_r := resp.get("success")):
-            print(f"missing sell rate")
+            print("missing sell rate")
             return
         # print(s_r)
 
@@ -633,7 +687,7 @@ class ReserveClient:
                 try:
                     resp = self.requestGET(endpoint, params=params)
                     if not (r := resp.get("success")):
-                        print(f"missing triggers")
+                        print("missing triggers")
                         return
                     if (
                         isinstance(r, dict)
@@ -671,7 +725,7 @@ class ReserveClient:
                 try:
                     resp = self.requestGET(endpoint, params=params)
                     if not (r := resp.get("success")):
-                        print(f"missing trades")
+                        print("missing trades")
                         return past_trades
                     if (
                         isinstance(r, dict)
@@ -711,7 +765,7 @@ class ReserveClient:
             try:
                 resp = self.requestGET(endpoint, params=params)
                 if not (r := resp.get("success")):
-                    print(f"missing open orders")
+                    print("missing open orders")
                     return {"failed": "missing open orders"}
                 # print(r)
                 if isinstance(r, dict) and "success" in r and r["success"]:
@@ -943,6 +997,51 @@ class ReserveClient:
     def get_feed_configuration(self) -> dict[str, Any]:
         return self.requestGET(self.endpoints["v3_feed-configurations"].full_path())
 
+    def get_setting_change(self, change_id: int) -> dict[str, Any]:
+        """Get specific setting change by ID."""
+        endpoint = (
+            f"{self.endpoints['setting-v4_v4_setting-change'].full_path()}/{change_id}"
+        )
+        return self.requestGET(endpoint)
+
+    def get_setting_changes(self, catalog: str = "main") -> dict[str, Any]:
+        """Get all setting changes for a specific catalog."""
+        params = {"catalog": catalog}
+        return self.requestGET(
+            self.endpoints["setting-v4_v4_setting-change"].full_path(), params=params
+        )
+
+    def create_setting_change(
+        self, change_list: list[dict[str, Any]], change_catalog: str = "main"
+    ) -> dict[str, Any]:
+        """Create a new setting change with the specified change list.
+
+        Args:
+            change_list: List of changes to apply
+            change_catalog: Catalog name (default: "main")
+
+        Returns:
+            dict with success/failed status
+        """
+        data = {"change_catalog": change_catalog, "change_list": change_list}
+        return self.requestPOST(
+            self.endpoints["setting-v4_v4_setting-change"].full_path(), json=data
+        )
+
+    def get_all_integration(self) -> dict[str, Any]:
+        """Get all integration data."""
+        return self.requestGET(
+            self.endpoints["setting-v4_v4_all-integration"].full_path()
+        )
+
+    def get_all_pair_rfq(self) -> dict[str, Any]:
+        """Get all pair RFQ data."""
+        return self.requestGET(self.endpoints["setting-v4_v4_all-pair-rfq"].full_path())
+
+    def get_trading_pair(self) -> dict[str, Any]:
+        """Get trading pair data."""
+        return self.requestGET(self.endpoints["setting-v4_v4_trading-pair"].full_path())
+
     def get_rates(
         self, from_time=ts_millis() - 86400 * 1000, to_time=ts_millis()
     ) -> dict[str, Any]:
@@ -1168,3 +1267,111 @@ class ReserveClient:
             timeout=timeout,
             secured=ep.secured,
         )
+
+    def show_change(self, change_id: int) -> None:
+        """
+        Retrieve the change details and process them using the appropriate handler.
+        Prints analysis of changes by type.
+        """
+        from collections import defaultdict
+
+        change_resp = self.get_setting_change(change_id)
+        if "success" not in change_resp:
+            print(
+                f"Failed to get change {change_id}: "
+                f"{change_resp.get('failed', 'Unknown error')}"
+            )
+            return
+
+        change_list = change_resp["success"]
+        updates_by_asset = defaultdict(dict)
+
+        for change in change_list.get("data", {}).get("change_list", []):
+            change_type = change["type"]
+            change_data = change["data"]
+            data_id = change_data["id"]
+            updates_by_asset[change_type][data_id] = change["data"]
+
+        for change_type, change_data in updates_by_asset.items():
+            self._analyze_change(change_type, change_data)
+
+    def _analyze_change(self, change_type: str, change_data: dict[str, Any]) -> None:
+        """Analyze changes by type and print differences."""
+        # Map change types to their corresponding getter methods
+        analyze_change_type_func = {
+            ChangeList.UPDATE_ASSET_GROUP_V4: (self.get_asset_group, None),
+            ChangeList.UPDATE_ASSET_GROUP_SETTING_V4: (
+                self.get_asset_group_setting,
+                self._get_asset_group_setting_setting_opts,
+            ),
+            ChangeList.UPDATE_RQF_PARAMS_V4: (self.get_all_pair_rfq, None),
+        }
+
+        handler_info = analyze_change_type_func.get(change_type)
+        if handler_info:
+            self._generic_analyze(change_data, *handler_info)
+        else:
+            print(f"No handler defined for change type: {change_type}")
+
+    def _generic_analyze(
+        self,
+        change_data: dict[str, Any],
+        data_getter: callable,
+        change_opts: callable = None,
+    ) -> None:
+        """Generic method to analyze changes between current and proposed settings."""
+        from copy import deepcopy
+
+        try:
+            from jsondiff import diff
+        except ImportError:
+            print("jsondiff not available. Install with: pip install jsondiff")
+            return
+
+        settings_resp = data_getter()
+        if "success" not in settings_resp:
+            print(
+                f"Failed to get current settings: "
+                f"{settings_resp.get('failed', 'Unknown error')}"
+            )
+            return
+
+        settings = settings_resp["success"].get("data", [])
+        new_settings = deepcopy(settings)
+
+        for setting in new_settings:
+            if setting["id"] not in change_data:
+                continue
+            change = change_data[setting["id"]]
+            for k in setting:
+                if k in change and change[k] is not None:
+                    setting[k] = change[k]
+            if change_opts is not None:
+                opts = change_opts(change, setting)
+                for k, v in opts.items():
+                    setting[k] = v
+
+        changes = diff(settings, new_settings)
+
+        for index, change in changes.items():
+            setting = settings[index]
+            print(
+                f"ID: {setting.get('id')}, Name: {setting.get('name')}, "
+                f"Change: {change}"
+            )
+
+    @staticmethod
+    def _get_asset_group_setting_setting_opts(
+        change: dict[str, Any], setting: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Extract setting options based on setting type."""
+        setting_type = change.get("setting_type") or setting["setting_type"]
+        if setting_type == AssetGroupSettingType.ONCHAIN_CEX_PAIR_REBALANCE:
+            setting_opts = change["onchain_cex_pair_rebalance_setting"]
+        elif setting_type == AssetGroupSettingType.ONCHAIN_CEX_PAIR_PRICING:
+            setting_opts = change["onchain_cex_pair_pricing_setting"]
+        elif setting_type == AssetGroupSettingType.CEX_GROUP_SETTING:
+            setting_opts = change["cex_group_setting"]
+        else:
+            setting_opts = {}
+        return {"setting_opts": setting_opts}
