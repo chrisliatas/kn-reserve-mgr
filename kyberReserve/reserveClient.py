@@ -1034,6 +1034,43 @@ class ReserveClient:
             self.endpoints["setting-v4_v4_all-integration"].full_path()
         )
 
+    def get_integration_source_setting(self) -> dict[str, Any]:
+        """Get integration source setting list."""
+        return self.requestGET(
+            self.endpoints["setting-v4_v4_integration-source-setting"].full_path()
+        )
+
+    def set_integration_source_setting(
+        self, payload: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """Create or update integration source setting(s).
+
+        payload example:
+        [
+          {"integration": "bebop", "source": "dzap", "is_ban": true}
+        ]
+        """
+        return self.requestPOST(
+            self.endpoints["setting-v4_v4_integration-source-setting"].full_path(),
+            json=payload,
+        )
+
+    def delete_integration_source_setting(
+        self, payload: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """Delete integration source setting(s).
+
+        payload example same as POST
+        """
+        return self.requestDELETE(
+            self.endpoints["setting-v4_v4_integration-source-setting"].full_path(),
+            json=payload,
+        )
+
+    def get_supported_integrations(self) -> dict[str, Any]:
+        """Get list of supported integrations from RFQ service."""
+        return self.requestGET(self.endpoints["rfq_supported_integration"].full_path())
+
     def get_all_pair_rfq(self) -> dict[str, Any]:
         """Get all pair RFQ data."""
         return self.requestGET(self.endpoints["setting-v4_v4_all-pair-rfq"].full_path())
