@@ -445,9 +445,24 @@ class ReserveClient:
     ) -> tuple[dict, dict, dict, dict]:
         # TODO: add support for asset_class and asset_type
         resp = self.get_asset_info(asset_class, asset_type, incl_disabled)
-        assets = resp["success"].get("data")
+        # Handle case where the request failed or returned no data
+        if "success" not in resp:
+            failed_info = resp.get("failed", resp)
+            lgr.error(
+                "cannot get asset info - request failed: %s",
+                failed_info,
+            )
+            return {}, {}, {}, {}
+
+        # resp['success'] is expected to be a dict containing 'data'
+        success_obj = resp["success"] if isinstance(resp["success"], dict) else None
+        assets = success_obj.get("data") if success_obj else None
         if not assets:
-            raise BaseException(f"cannot get asset info {resp['success']['reason']}")
+            lgr.error(
+                "cannot get asset info - missing data field in response: %s",
+                resp.get("success"),
+            )
+            return {}, {}, {}, {}
         tokens = {}
         exchanges = {}  # TODO: fix exchange extraction
         tokens_addr = {}
