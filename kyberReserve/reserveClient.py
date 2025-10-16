@@ -198,9 +198,10 @@ class ReserveClient:
         timeout: int | None = None,
     ) -> dict[str, Any]:
         try:
+            endpoint_path = endpoint.lstrip("/")
             resp = self._request(
                 method=method,
-                url=f"{self.host}/{endpoint}",
+                url=f"{self.host}/{endpoint_path}",
                 data=data,
                 params=params,
                 json=json,
@@ -213,11 +214,11 @@ class ReserveClient:
             else:
                 reason = (
                     f" bad http status {resp.status_code} reply:{resp.text} for request"
-                    f" to {endpoint}, params:{params}, data: {data}, json: {json}"
+                    f" to {endpoint_path}, params:{params}, data: {data}, json: {json}"
                 )
                 return {"failed": reason}
         except requests.exceptions.RequestException as e:
-            reason = f"Cannot make request to host: {endpoint} {e.__repr__()}"
+            reason = f"Cannot make request to host: {endpoint_path} {e.__repr__()}"
             return {"failed": reason}
 
     def requestGET(
