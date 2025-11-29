@@ -1148,7 +1148,7 @@ class ReserveClient:
         custom params use `get_custom_volatility`."""
         params = {"pairs": ",".join(pairs)}
         return self.requestGET(
-            self.endpoints["price-volatility_price-volatility"].full_path(),
+            self.endpoints["price-volatility-v4_v4_price-volatility"].full_path(),
             params=params,
         )
 
@@ -1208,7 +1208,7 @@ class ReserveClient:
             "target_adjust": target_adjust,
         }
         return self.requestGET(
-            self.endpoints["price-volatility_custom-volatility"].full_path(),
+            self.endpoints["price-volatility-v4_v4_custom-volatility"].full_path(),
             params=params,
         )
 
@@ -1231,7 +1231,7 @@ class ReserveClient:
             _pairs.append(f"{base}-{quote}")
         params = {"pairs": ",".join(_pairs)}
         lgr.debug(f"ReserveClient - multi_integration_volatility: pairs {params}")
-        ep = "price-volatility_price-volatility_multiple-integration"
+        ep = "price-volatility-v4_price-volatility_multiple-integration"
         return self.requestGET(
             self.endpoints[ep].full_path(),
             params=params,
