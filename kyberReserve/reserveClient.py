@@ -1152,6 +1152,43 @@ class ReserveClient:
             params=params,
         )
 
+    def get_legacy_volatility(
+        self,
+        pairs: list[str],
+        sample_number: int,
+        horizon_multi: float,
+        sample_interval_sec: int,
+        period_sec: int,
+        weight: float,
+        ddof: int = 0,
+    ) -> dict[str, Any]:
+        """Get legacy volatility for the given pairs.
+
+        This uses the legacy price-volatility endpoint that applies an exponential
+        weighting with a configurable horizon multiplier.
+        Args:
+            pairs: list of pairs, eg. ["ETH-USDT", "BTC-USDT"]
+            sample_number: number of samples in the window
+            horizon_multi: multiplier for the target horizon (legacy behaviour)
+            sample_interval_sec: interval between samples (seconds)
+            period_sec: target period (seconds) used for volatility calculation
+            weight: lambda parameter for exponential weighting
+            ddof: degrees of freedom for std calculation, defaults to 0
+        """
+        params = {
+            "pairs": ",".join(pairs),
+            "sample_number": sample_number,
+            "horizon_multi": horizon_multi,
+            "sample_interval_sec": sample_interval_sec,
+            "period_sec": period_sec,
+            "weight": weight,
+            "ddof": ddof,
+        }
+        return self.requestGET(
+            self.endpoints["price-volatility-v4_v4_legacy-volatility"].full_path(),
+            params=params,
+        )
+
     def get_custom_volatility(
         self,
         pairs: list[str],
