@@ -437,6 +437,37 @@ class ReserveClient:
             params=params,
         )
 
+    def get_rfq_orders(
+        self, from_time: int, to_time: int, force: bool = False
+    ) -> dict[str, Any]:
+        """Get RFQ orders for a time range (milliseconds).
+
+        Performance sensitive: recommended window is 5 minutes, max 10 minutes.
+        Requests over 10 minutes require force=True.
+        """
+        if from_time >= to_time:
+            return {"failed": "from_time must be < to_time (milliseconds)"}
+        window_ms = to_time - from_time
+        max_window_ms = 10 * 60 * 1000
+        if window_ms > max_window_ms and not force:
+            return {
+                "failed": (
+                    "Requested window > 10 minutes. "
+                    "Set force=True to proceed (perf-sensitive)."
+                )
+            }
+        if window_ms > max_window_ms and force:
+            lgr.warning(
+                "get_rfq_orders: force=True for window %sms (>%sms)",
+                window_ms,
+                max_window_ms,
+            )
+        params = {"from_time": from_time, "to_time": to_time}
+        return self.requestGET(
+            self.endpoints["rfq_orders"].full_path(),
+            params=params,
+        )
+
     def get_tokens_exchanges_from_asset_info(
         self,
         asset_class: AssetClass = AssetClass.ALL,
