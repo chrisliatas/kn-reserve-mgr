@@ -1126,6 +1126,12 @@ class ReserveClient:
         """Get trading pair data."""
         return self.requestGET(self.endpoints["setting-v4_v4_trading-pair"].full_path())
 
+    def get_rfq_params_linear(self) -> dict[str, Any]:
+        """Config server linear RFQ params per asset; dynamically allocated."""
+        return self.requestGET(
+            self.endpoints["setting-v4_v4_rfq-params-linear"].full_path()
+        )
+
     def get_rates(
         self, from_time=ts_millis() - 86400 * 1000, to_time=ts_millis()
     ) -> dict[str, Any]:
