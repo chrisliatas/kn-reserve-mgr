@@ -1132,6 +1132,25 @@ class ReserveClient:
             self.endpoints["setting-v4_v4_rfq-params-linear"].full_path()
         )
 
+    def get_rfq_params_linear_changelogs(
+        self, from_time: int, to_time: int
+    ) -> dict[str, Any]:
+        """Get linear RFQ params changelogs for a time range (seconds)."""
+        if (
+            isinstance(from_time, bool)
+            or isinstance(to_time, bool)
+            or not isinstance(from_time, int)
+            or not isinstance(to_time, int)
+        ):
+            return {"failed": "from_time and to_time must be integers (seconds)"}
+        if from_time >= to_time:
+            return {"failed": "from_time must be < to_time (seconds)"}
+        params = {"from": from_time, "to": to_time}
+        return self.requestGET(
+            self.endpoints["setting-v4_v4_rfq-params-linear-changelogs"].full_path(),
+            params=params,
+        )
+
     def get_rates(
         self, from_time=ts_millis() - 86400 * 1000, to_time=ts_millis()
     ) -> dict[str, Any]:
