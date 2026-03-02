@@ -1135,7 +1135,10 @@ class ReserveClient:
     def get_rfq_params_linear_changelogs(
         self, from_time: int, to_time: int
     ) -> dict[str, Any]:
-        """Get linear RFQ params changelogs for a time range (seconds)."""
+        """Get linear RFQ params changelogs for a time range (seconds).
+
+        Max allowed duration is 168h (7 days).
+        """
         if (
             isinstance(from_time, bool)
             or isinstance(to_time, bool)
@@ -1145,6 +1148,14 @@ class ReserveClient:
             return {"failed": "from_time and to_time must be integers (seconds)"}
         if from_time >= to_time:
             return {"failed": "from_time must be < to_time (seconds)"}
+        max_duration_sec = 168 * 3600
+        if to_time - from_time > max_duration_sec:
+            return {
+                "failed": (
+                    "invalid time range: duration exceeds max allowed range "
+                    "of 168h0m0s"
+                )
+            }
         params = {"from": from_time, "to": to_time}
         return self.requestGET(
             self.endpoints["setting-v4_v4_rfq-params-linear-changelogs"].full_path(),
