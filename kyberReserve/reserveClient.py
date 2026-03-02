@@ -1208,6 +1208,30 @@ class ReserveClient:
             params=params,
         )
 
+    def get_ewma_volatility(
+        self, pairs: list[str], volatility_period_second: int
+    ) -> dict[str, Any]:
+        """Get EWMA volatility for pairs using HL period in seconds.
+        Endpoint currently available only in STAGING backend."""
+        if not isinstance(pairs, list) or len(pairs) == 0:
+            return {"failed": "pairs must be a non-empty list[str]"}
+        if any(not isinstance(pair, str) or not pair.strip() for pair in pairs):
+            return {"failed": "pairs must contain non-empty strings"}
+        if (
+            isinstance(volatility_period_second, bool)
+            or not isinstance(volatility_period_second, int)
+            or volatility_period_second <= 0
+        ):
+            return {"failed": "volatility_period_second must be a positive integer"}
+        params = {
+            "pairs": ",".join(pairs),
+            "volatility_period_second": volatility_period_second,
+        }
+        return self.requestGET(
+            self.endpoints["price-volatility-v4_v4_ewma-volatility"].full_path(),
+            params=params,
+        )
+
     def get_legacy_volatility(
         self,
         pairs: list[str],
