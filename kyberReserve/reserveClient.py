@@ -1,11 +1,14 @@
 import base64
+import csv
 import hashlib
 import hmac
+import json
 import logging
+import os
 import urllib.parse
 from datetime import timedelta
 from functools import wraps
-from time import time
+from time import sleep, time
 from timeit import default_timer as timer
 from typing import Any, Callable
 
@@ -1132,12 +1135,122 @@ class ReserveClient:
             self.endpoints["setting-v4_v4_rfq-params-linear"].full_path()
         )
 
+    @staticmethod
+    def _rfq_changelog_chunks(
+        from_time: int, to_time: int, max_window_sec: int
+    ) -> list[tuple[int, int]]:
+        chunks: list[tuple[int, int]] = []
+        chunk_from = from_time
+        while chunk_from < to_time:
+            chunk_to = min(chunk_from + max_window_sec, to_time)
+            chunks.append((chunk_from, chunk_to))
+            chunk_from = chunk_to
+        return chunks
+
+    @staticmethod
+    def _extract_rfq_changelog_rows(payload: Any) -> list[dict[str, Any]]:
+        raw_rows: list[Any]
+        if isinstance(payload, list):
+            raw_rows = payload
+        elif isinstance(payload, dict):
+            if isinstance(payload.get("data"), list):
+                raw_rows = payload["data"]
+            else:
+                raw_rows = [payload]
+        else:
+            return []
+
+        rows: list[dict[str, Any]] = []
+        for row in raw_rows:
+            if isinstance(row, dict):
+                rows.append(row)
+            else:
+                rows.append({"value": row})
+        return rows
+
+    @staticmethod
+    def _flatten_row_for_csv(row: dict[str, Any], prefix: str = "") -> dict[str, Any]:
+        flattened: dict[str, Any] = {}
+        for key, value in row.items():
+            col = f"{prefix}.{key}" if prefix else str(key)
+            if isinstance(value, dict):
+                flattened.update(ReserveClient._flatten_row_for_csv(value, col))
+            elif isinstance(value, list):
+                flattened[col] = json.dumps(
+                    value, ensure_ascii=False, separators=(",", ":")
+                )
+            else:
+                flattened[col] = value
+        return flattened
+
+    def _write_rows_to_csv_incremental(
+        self,
+        output_path: str,
+        rows: list[dict[str, Any]],
+        csv_state: dict[str, Any],
+    ) -> None:
+        if not rows:
+            return
+
+        incoming_columns: list[str] = []
+        for row in rows:
+            for column in row:
+                if column not in incoming_columns:
+                    incoming_columns.append(column)
+
+        existing_columns: list[str] = csv_state["columns"]
+        if not existing_columns:
+            csv_state["columns"] = incoming_columns[:]
+            with open(output_path, "w", newline="") as outfile:
+                writer = csv.DictWriter(outfile, fieldnames=csv_state["columns"])
+                writer.writeheader()
+                for row in rows:
+                    writer.writerow(
+                        {column: row.get(column, "") for column in csv_state["columns"]}
+                    )
+            return
+
+        new_columns = [col for col in incoming_columns if col not in existing_columns]
+        if not new_columns:
+            with open(output_path, "a", newline="") as outfile:
+                writer = csv.DictWriter(outfile, fieldnames=existing_columns)
+                for row in rows:
+                    writer.writerow(
+                        {column: row.get(column, "") for column in existing_columns}
+                    )
+            return
+
+        existing_rows: list[dict[str, Any]] = []
+        if os.path.getsize(output_path) > 0:
+            with open(output_path, "r", newline="") as infile:
+                reader = csv.DictReader(infile)
+                existing_rows = list(reader)
+
+        updated_columns = existing_columns + new_columns
+        csv_state["columns"] = updated_columns
+        with open(output_path, "w", newline="") as outfile:
+            writer = csv.DictWriter(outfile, fieldnames=updated_columns)
+            writer.writeheader()
+            for row in existing_rows:
+                writer.writerow(
+                    {column: row.get(column, "") for column in updated_columns}
+                )
+            for row in rows:
+                writer.writerow(
+                    {column: row.get(column, "") for column in updated_columns}
+                )
+
     def get_rfq_params_linear_changelogs(
-        self, from_time: int, to_time: int
+        self,
+        from_time: int,
+        to_time: int,
+        output_path: str | None = None,
+        include_data: bool = False,
     ) -> dict[str, Any]:
         """Get linear RFQ params changelogs for a time range (seconds).
 
-        Max allowed duration is 168h (7 days).
+        Max allowed duration is 168h (7 days) per request, method auto-splits bigger
+        ranges and saves each successful chunk incrementally to CSV.
         """
         if (
             isinstance(from_time, bool)
@@ -1148,19 +1261,152 @@ class ReserveClient:
             return {"failed": "from_time and to_time must be integers (seconds)"}
         if from_time >= to_time:
             return {"failed": "from_time must be < to_time (seconds)"}
-        max_duration_sec = 168 * 3600
-        if to_time - from_time > max_duration_sec:
+
+        if not isinstance(include_data, bool):
+            return {"failed": "include_data must be a boolean"}
+        if output_path is not None and not isinstance(output_path, str):
+            return {"failed": "output_path must be a string or None"}
+
+        output_file = output_path or f"rfq_changes_{from_time}_{to_time}.csv"
+        output_file = os.path.abspath(output_file)
+        if os.path.exists(output_file):
             return {
                 "failed": (
-                    "invalid time range: duration exceeds max allowed range "
-                    "of 168h0m0s"
+                    "output file already exists; choose another output_path or remove "
+                    f"existing file: {output_file}"
                 )
             }
-        params = {"from": from_time, "to": to_time}
-        return self.requestGET(
-            self.endpoints["setting-v4_v4_rfq-params-linear-changelogs"].full_path(),
-            params=params,
+        try:
+            with open(output_file, "x"):
+                pass
+        except OSError as ex:
+            return {"failed": f"cannot create output file {output_file}: {ex}"}
+
+        max_window_sec = 168 * 3600
+        chunks = self._rfq_changelog_chunks(from_time, to_time, max_window_sec)
+        endpoint = self.endpoints[
+            "setting-v4_v4_rfq-params-linear-changelogs"
+        ].full_path()
+        total_chunks = len(chunks)
+        completed_chunks = 0
+        total_rows = 0
+        retries_used = 0
+        csv_state: dict[str, Any] = {"columns": []}
+        all_rows: list[dict[str, Any]] = []
+        start_ts = timer()
+
+        print(
+            f"[rfq-changelogs] start from={from_time} to={to_time} "
+            f"chunks={total_chunks} output={output_file}"
         )
+        for idx, (chunk_from, chunk_to) in enumerate(chunks, start=1):
+            print(
+                f"[rfq-changelogs] chunk {idx}/{total_chunks} "
+                f"from={chunk_from} to={chunk_to}"
+            )
+            params = {"from": chunk_from, "to": chunk_to}
+            chunk_resp: dict[str, Any] | None = None
+            fail_reason = "unknown error"
+
+            for attempt in range(3):
+                if attempt > 0:
+                    retries_used += 1
+                chunk_resp = self.requestGET(endpoint, params=params)
+                if "success" in chunk_resp:
+                    break
+                fail_reason = str(chunk_resp.get("failed", "unknown error"))
+                if attempt < 2:
+                    backoff = 2**attempt
+                    print(
+                        f"[rfq-changelogs] chunk {idx}/{total_chunks} failed "
+                        f"(attempt {attempt + 1}/3): {fail_reason}; retry in {backoff}s"
+                    )
+                    sleep(backoff)
+
+            if not chunk_resp or "success" not in chunk_resp:
+                elapsed_sec = round(timer() - start_ts, 3)
+                print(
+                    f"[rfq-changelogs] failed chunk {idx}/{total_chunks} "
+                    f"from={chunk_from} to={chunk_to}: {fail_reason}"
+                )
+                return {
+                    "failed": fail_reason,
+                    "meta": {
+                        "output_path": output_file,
+                        "total_chunks": total_chunks,
+                        "completed_chunks": completed_chunks,
+                        "failed_chunk_from": chunk_from,
+                        "failed_chunk_to": chunk_to,
+                        "total_rows_saved": total_rows,
+                        "retries_used": retries_used,
+                        "elapsed_sec": elapsed_sec,
+                    },
+                }
+
+            rows = self._extract_rfq_changelog_rows(chunk_resp["success"])
+            fetch_ts = int(time())
+            rows_for_csv = [
+                self._flatten_row_for_csv(
+                    {
+                        **row,
+                        "chunk_from": chunk_from,
+                        "chunk_to": chunk_to,
+                        "fetch_ts": fetch_ts,
+                    }
+                )
+                for row in rows
+            ]
+            try:
+                self._write_rows_to_csv_incremental(
+                    output_file, rows_for_csv, csv_state
+                )
+            except OSError as ex:
+                elapsed_sec = round(timer() - start_ts, 3)
+                return {
+                    "failed": f"cannot write output file {output_file}: {ex}",
+                    "meta": {
+                        "output_path": output_file,
+                        "total_chunks": total_chunks,
+                        "completed_chunks": completed_chunks,
+                        "failed_chunk_from": chunk_from,
+                        "failed_chunk_to": chunk_to,
+                        "total_rows_saved": total_rows,
+                        "retries_used": retries_used,
+                        "elapsed_sec": elapsed_sec,
+                    },
+                }
+
+            completed_chunks += 1
+            total_rows += len(rows)
+            if include_data:
+                all_rows += rows
+
+            print(
+                f"[rfq-changelogs] chunk {idx}/{total_chunks} success rows={len(rows)} "
+                f"total_rows={total_rows}"
+            )
+            if idx < total_chunks:
+                print("[rfq-changelogs] waiting 0.5s before next chunk")
+                sleep(0.5)
+
+        elapsed_sec = round(timer() - start_ts, 3)
+        success_payload: dict[str, Any] = {
+            "from_time": from_time,
+            "to_time": to_time,
+            "output_path": output_file,
+            "total_chunks": total_chunks,
+            "completed_chunks": completed_chunks,
+            "total_rows": total_rows,
+            "retries_used": retries_used,
+            "elapsed_sec": elapsed_sec,
+        }
+        if include_data:
+            success_payload["data"] = all_rows
+        print(
+            f"[rfq-changelogs] completed chunks={completed_chunks}/{total_chunks} "
+            f"rows={total_rows} output={output_file}"
+        )
+        return {"success": success_payload}
 
     def get_rates(
         self, from_time=ts_millis() - 86400 * 1000, to_time=ts_millis()
