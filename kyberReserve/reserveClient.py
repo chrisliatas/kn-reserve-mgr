@@ -1489,6 +1489,12 @@ class ReserveClient:
             params=params,
         )
 
+    def get_symbol_tiers(self) -> dict[str, Any]:
+        """Get current tradable pair liquidity tier classification (A/B/C)."""
+        return self.requestGET(
+            self.endpoints["price-volatility-v4_v4_symbol-tiers"].full_path()
+        )
+
     def get_legacy_volatility(
         self,
         pairs: list[str],
