@@ -3,8 +3,12 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest.mock import MagicMock, patch
+
+import requests
 
 from kyberReserve.endpoints import EndpointItem, ReserveEndpoints, load_endpoints
+from kyberReserve.reserveClient import ReserveClient
 
 
 class TestEndpoints(unittest.TestCase):
@@ -125,6 +129,32 @@ class TestEndpoints(unittest.TestCase):
         for key, item in reserve.endpoints.items():
             self.assertIsInstance(item, EndpointItem)
             self.assertEqual(item.path, loaded[key].path)
+
+    def test_request_get_url_includes_backend_body_on_http_error(self):
+        client: ReserveClient = ReserveClient.__new__(ReserveClient)
+        response = MagicMock()
+        response.text = '{"error":"max time range: 86400000","success":false}'
+        http_error = requests.exceptions.HTTPError(
+            "400 Client Error: Bad Request for url: https://example.com/test",
+            response=response,
+        )
+
+        with patch.object(client, "_request", return_value=response):
+            response.raise_for_status.side_effect = http_error
+            resp = client.requestGET_url(
+                "https://example.com/test", params={"a": 1}, timeout=10
+            )
+
+        self.assertEqual(
+            resp,
+            {
+                "failed": (
+                    "400 Client Error: Bad Request for url: "
+                    "https://example.com/test; response: "
+                    '{"error":"max time range: 86400000","success":false}'
+                )
+            },
+        )
 
 
 if __name__ == "__main__":

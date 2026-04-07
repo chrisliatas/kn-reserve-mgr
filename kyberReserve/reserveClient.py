@@ -285,6 +285,13 @@ class ReserveClient:
             )
             resp.raise_for_status()
         except Exception as ex:
+            if (
+                isinstance(ex, requests.exceptions.HTTPError)
+                and ex.response is not None
+            ):
+                body = ex.response.text.strip()
+                if body:
+                    return {"failed": f"{ex}; response: {body}"}
             return {"failed": str(ex)}
         return {"success": resp}
 
@@ -1148,6 +1155,18 @@ class ReserveClient:
         return chunks
 
     @staticmethod
+    def _time_chunks(
+        from_time: int, to_time: int, max_window: int
+    ) -> list[tuple[int, int]]:
+        chunks: list[tuple[int, int]] = []
+        chunk_from = from_time
+        while chunk_from < to_time:
+            chunk_to = min(chunk_from + max_window, to_time)
+            chunks.append((chunk_from, chunk_to))
+            chunk_from = chunk_to
+        return chunks
+
+    @staticmethod
     def _extract_rfq_changelog_rows(payload: Any) -> list[dict[str, Any]]:
         raw_rows: list[Any]
         if isinstance(payload, list):
@@ -1239,6 +1258,226 @@ class ReserveClient:
                 writer.writerow(
                     {column: row.get(column, "") for column in updated_columns}
                 )
+
+    def _run_chunked_trade_log_fetch(
+        self,
+        *,
+        method_name: str,
+        log_prefix: str,
+        endpoint_key: str,
+        from_time: int,
+        to_time: int,
+        output_path: str | None,
+        include_data: bool,
+        default_output_prefix: str,
+        from_param: str,
+        to_param: str,
+        max_window_ms: int | None = None,
+        limit: int | None = None,
+    ) -> dict[str, Any]:
+        if (
+            isinstance(from_time, bool)
+            or isinstance(to_time, bool)
+            or not isinstance(from_time, int)
+            or not isinstance(to_time, int)
+        ):
+            return {"failed": "from_time and to_time must be integers (milliseconds)"}
+        if 0 <= from_time < 10**11 and 0 < to_time < 10**11:
+            return {
+                "failed": (
+                    "from_time and to_time appear to be Unix timestamps in seconds; "
+                    f"{method_name} expects milliseconds"
+                )
+            }
+        if from_time >= to_time:
+            return {"failed": "from_time must be < to_time (milliseconds)"}
+        if limit is not None and (
+            isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0
+        ):
+            return {"failed": "limit must be a positive integer or None"}
+        if not isinstance(include_data, bool):
+            return {"failed": "include_data must be a boolean"}
+        if output_path is not None and not isinstance(output_path, str):
+            return {"failed": "output_path must be a string or None"}
+
+        day_ms = 24 * 60 * 60 * 1000
+        max_window_ms = max_window_ms if max_window_ms is not None else 7 * day_ms
+        use_file_output = output_path is not None or (to_time - from_time) > day_ms
+        output_file: str | None = None
+        if use_file_output:
+            output_file = os.path.abspath(
+                output_path or f"{default_output_prefix}_{from_time}_{to_time}.csv"
+            )
+            if os.path.exists(output_file):
+                return {
+                    "failed": (
+                        "output file already exists; choose another output_path or "
+                        f"remove existing file: {output_file}"
+                    )
+                }
+            try:
+                with open(output_file, "x"):
+                    pass
+            except OSError as ex:
+                return {"failed": f"cannot create output file {output_file}: {ex}"}
+
+        chunks = self._time_chunks(from_time, to_time, max_window_ms)
+        ep = self.endpoints[endpoint_key]
+        total_chunks = len(chunks)
+        completed_chunks = 0
+        total_rows = 0
+        retries_used = 0
+        csv_state: dict[str, Any] = {"columns": []}
+        all_rows: list[dict[str, Any]] = []
+        start_ts = timer()
+
+        print(
+            f"[{log_prefix}] start from={from_time} to={to_time} "
+            f"chunks={total_chunks} file_mode={use_file_output}"
+            + (f" output={output_file}" if output_file else "")
+            + (f" limit={limit}" if limit is not None else "")
+        )
+        for idx, (chunk_from, chunk_to) in enumerate(chunks, start=1):
+            print(
+                f"[{log_prefix}] chunk {idx}/{total_chunks} "
+                f"from={chunk_from} to={chunk_to}"
+            )
+            params: dict[str, Any] = {from_param: chunk_from, to_param: chunk_to}
+            if limit is not None:
+                params["limit"] = limit
+            chunk_resp: dict[str, Any] | None = None
+            fail_reason = "unknown error"
+
+            for attempt in range(3):
+                if attempt > 0:
+                    retries_used += 1
+                chunk_resp = self.requestGET_url(
+                    ep.full_url(),
+                    params=params,
+                    timeout=120,
+                    secured=ep.secured,
+                )
+                if "success" in chunk_resp:
+                    break
+                fail_reason = str(chunk_resp.get("failed", "unknown error"))
+                if attempt < 2:
+                    backoff = 2**attempt
+                    print(
+                        f"[{log_prefix}] chunk {idx}/{total_chunks} failed "
+                        f"(attempt {attempt + 1}/3): {fail_reason}; retry in {backoff}s"
+                    )
+                    sleep(backoff)
+
+            if not chunk_resp or "success" not in chunk_resp:
+                elapsed_sec = round(timer() - start_ts, 3)
+                print(
+                    f"[{log_prefix}] failed chunk {idx}/{total_chunks} "
+                    f"from={chunk_from} to={chunk_to}: {fail_reason}"
+                )
+                return {
+                    "failed": fail_reason,
+                    "meta": {
+                        "output_path": output_file,
+                        "total_chunks": total_chunks,
+                        "completed_chunks": completed_chunks,
+                        "failed_chunk_from": chunk_from,
+                        "failed_chunk_to": chunk_to,
+                        "total_rows_saved": total_rows,
+                        "retries_used": retries_used,
+                        "elapsed_sec": elapsed_sec,
+                    },
+                }
+
+            try:
+                payload = chunk_resp["success"].json()
+            except Exception as ex:
+                elapsed_sec = round(timer() - start_ts, 3)
+                return {
+                    "failed": f"cannot decode trade logs response json: {ex}",
+                    "meta": {
+                        "output_path": output_file,
+                        "total_chunks": total_chunks,
+                        "completed_chunks": completed_chunks,
+                        "failed_chunk_from": chunk_from,
+                        "failed_chunk_to": chunk_to,
+                        "total_rows_saved": total_rows,
+                        "retries_used": retries_used,
+                        "elapsed_sec": elapsed_sec,
+                    },
+                }
+
+            rows = self._extract_rfq_changelog_rows(payload)
+            fetch_ts = int(time())
+            if use_file_output and output_file:
+                rows_for_csv = [
+                    self._flatten_row_for_csv(
+                        {
+                            **row,
+                            "chunk_from": chunk_from,
+                            "chunk_to": chunk_to,
+                            "fetch_ts": fetch_ts,
+                        }
+                    )
+                    for row in rows
+                ]
+                try:
+                    self._write_rows_to_csv_incremental(
+                        output_file, rows_for_csv, csv_state
+                    )
+                except OSError as ex:
+                    elapsed_sec = round(timer() - start_ts, 3)
+                    return {
+                        "failed": f"cannot write output file {output_file}: {ex}",
+                        "meta": {
+                            "output_path": output_file,
+                            "total_chunks": total_chunks,
+                            "completed_chunks": completed_chunks,
+                            "failed_chunk_from": chunk_from,
+                            "failed_chunk_to": chunk_to,
+                            "total_rows_saved": total_rows,
+                            "retries_used": retries_used,
+                            "elapsed_sec": elapsed_sec,
+                        },
+                    }
+
+            completed_chunks += 1
+            total_rows += len(rows)
+            if include_data or not use_file_output:
+                all_rows += rows
+
+            print(
+                f"[{log_prefix}] chunk {idx}/{total_chunks} success rows={len(rows)} "
+                f"total_rows={total_rows}"
+            )
+            if idx < total_chunks:
+                print(f"[{log_prefix}] waiting 0.5s before next chunk")
+                sleep(0.5)
+
+        elapsed_sec = round(timer() - start_ts, 3)
+        if not use_file_output:
+            print(
+                f"[{log_prefix}] completed chunks={completed_chunks}/{total_chunks} "
+                f"rows={total_rows} returned_in_memory=True"
+            )
+            return {"success": all_rows}
+
+        success_payload: dict[str, Any] = {
+            "from_time": from_time,
+            "to_time": to_time,
+            "output_path": output_file,
+            "total_chunks": total_chunks,
+            "completed_chunks": completed_chunks,
+            "total_rows": total_rows,
+            "retries_used": retries_used,
+            "elapsed_sec": elapsed_sec,
+        }
+        if include_data:
+            success_payload["data"] = all_rows
+        print(
+            f"[{log_prefix}] completed chunks={completed_chunks}/{total_chunks} "
+            f"rows={total_rows} output={output_file}"
+        )
+        return {"success": success_payload}
 
     def get_rfq_params_linear_changelogs(
         self,
@@ -1688,17 +1927,65 @@ class ReserveClient:
         return []
 
     def get_general_tradelogs(
-        self, from_ts: int, to_ts: int, timeout: int = 30
+        self,
+        from_time: int,
+        to_time: int,
+        output_path: str | None = None,
+        include_data: bool = False,
     ) -> dict[str, Any]:
-        """Get general trade logs for the given time range.
-        Timestamps are in milliseconds. There is a 24h limit for the time range."""
-        params = {"from_time": from_ts, "to_time": to_ts}
-        ep = self.endpoints["tradelogs"]
-        return self.requestGET_url(
-            ep.full_url(),
-            params=params,
-            timeout=timeout,
-            secured=ep.secured,
+        """Get tradelogs v2 for the given time range in milliseconds.
+
+        Dataset includes all recorded trades from Kipseli, KyberNetwork, and
+        competition. Requests are auto-split into 1-day windows for backend
+        compatibility. Windows larger than 1 day default to CSV-backed output to
+        avoid large in-memory payloads. Second-based Unix timestamps are rejected;
+        use milliseconds.
+        """
+        return self._run_chunked_trade_log_fetch(
+            method_name="get_general_tradelogs",
+            log_prefix="trade-logs",
+            endpoint_key="tradelogs-v2-tradelogs_tradelogs",
+            from_time=from_time,
+            to_time=to_time,
+            output_path=output_path,
+            include_data=include_data,
+            default_output_prefix="raw_trades",
+            from_param="from_time",
+            to_param="to_time",
+            max_window_ms=24 * 60 * 60 * 1000,
+        )
+
+    def get_kipseli_tradelogs(
+        self,
+        from_time: int,
+        to_time: int,
+        limit: int = 10000,
+        output_path: str | None = None,
+        include_data: bool = False,
+    ) -> dict[str, Any]:
+        """Get xmonitor onchain trades for the given time range in milliseconds.
+
+        Dataset includes only Kipseli/KyberNetwork onchain trades. The endpoint is
+        not treated as having a hard 7-day server limit, but this client still
+        auto-splits large requests into windows up to 7 days each to go easier on
+        the backing DB. Windows larger than 1 day default to CSV-backed output to
+        avoid large in-memory payloads. Second-based Unix timestamps are rejected;
+        use milliseconds. Results are ordered ASC and include the full xmonitor
+        trade fields. limit defaults to 10000 and is passed through per request
+        chunk.
+        """
+        return self._run_chunked_trade_log_fetch(
+            method_name="get_kipseli_tradelogs",
+            log_prefix="onchain-trade-logs",
+            endpoint_key="xmonitor_v2/data_onchaintrades",
+            from_time=from_time,
+            to_time=to_time,
+            output_path=output_path,
+            include_data=include_data,
+            default_output_prefix="onchain_trades",
+            from_param="from",
+            to_param="to",
+            limit=limit,
         )
 
     def show_change(self, change_id: int) -> None:
