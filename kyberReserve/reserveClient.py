@@ -39,6 +39,8 @@ from kyberReserve.utils import (
 
 lgr = logging.getLogger(__name__)
 
+KNRESERVE_GATEWAY_HOST = "https://gateway.knreserve.com"
+
 
 def response_stats(func) -> Callable:
     """Decorator to record request - response statistics."""
@@ -167,6 +169,8 @@ class ReserveClient:
         secured: bool = True,
     ) -> Response:
         custom_headers = {}
+        if params and isinstance(params, dict):
+            params = params.copy()
         if params and isinstance(params, dict) and "integration" in params:
             if "0x/quote" in url:
                 if params["integration"] == "0x":
@@ -199,9 +203,10 @@ class ReserveClient:
         params: Any | None = None,
         json: Any | None = None,
         timeout: int | None = None,
+        fallback_host: str | None = None,
     ) -> dict[str, Any]:
+        endpoint_path = endpoint.lstrip("/")
         try:
-            endpoint_path = endpoint.lstrip("/")
             resp = self._request(
                 method=method,
                 url=f"{self.host}/{endpoint_path}",
@@ -221,6 +226,39 @@ class ReserveClient:
                 )
                 return {"failed": reason}
         except requests.exceptions.RequestException as e:
+            if fallback_host and isinstance(e, requests.exceptions.ConnectionError):
+                lgr.warning(
+                    "connection error for %s/%s, retrying via %s: %r",
+                    self.host,
+                    endpoint_path,
+                    fallback_host,
+                    e,
+                )
+                try:
+                    resp = self._request(
+                        method=method,
+                        url=f"{fallback_host}/{endpoint_path}",
+                        data=data,
+                        params=params,
+                        json=json,
+                        timeout=timeout or self.timeout,
+                        secured=True,
+                    )
+                    if resp.status_code == 200:
+                        resp_data = resp.json()
+                        return {"success": resp_data}
+                    reason = (
+                        f" bad http status {resp.status_code} reply:{resp.text} for"
+                        f" request to {fallback_host}/{endpoint_path}, params:{params},"
+                        f" data: {data}, json: {json}"
+                    )
+                    return {"failed": reason}
+                except requests.exceptions.RequestException as fallback_e:
+                    reason = (
+                        f"Cannot make request to fallback host: {endpoint_path} "
+                        f"{fallback_e.__repr__()}"
+                    )
+                    return {"failed": reason}
             reason = f"Cannot make request to host: {endpoint_path} {e.__repr__()}"
             return {"failed": reason}
 
@@ -231,6 +269,7 @@ class ReserveClient:
         params: Any | None = None,
         json: Any | None = None,
         timeout: int | None = None,
+        fallback_host: str | None = None,
     ) -> dict[str, Any]:
         return self.request(
             "GET",
@@ -239,6 +278,7 @@ class ReserveClient:
             params=params,
             json=json,
             timeout=timeout,
+            fallback_host=fallback_host,
         )
 
     def requestPOST(
@@ -248,6 +288,7 @@ class ReserveClient:
         params: Any | None = None,
         json: Any | None = None,
         timeout: int | None = None,
+        fallback_host: str | None = None,
     ) -> dict[str, Any]:
         return self.request(
             "POST",
@@ -256,6 +297,7 @@ class ReserveClient:
             params=params,
             json=json,
             timeout=timeout,
+            fallback_host=fallback_host,
         )
 
     def requestDELETE(
@@ -265,6 +307,7 @@ class ReserveClient:
         params: Any | None = None,
         json: Any | None = None,
         timeout: int | None = None,
+        fallback_host: str | None = None,
     ) -> dict[str, Any]:
         return self.request(
             "DELETE",
@@ -273,6 +316,7 @@ class ReserveClient:
             params=params,
             json=json,
             timeout=timeout,
+            fallback_host=fallback_host,
         )
 
     def requestGET_url(
@@ -476,6 +520,7 @@ class ReserveClient:
         return self.requestGET(
             self.endpoints["rfq_orders"].full_path(),
             params=params,
+            fallback_host=KNRESERVE_GATEWAY_HOST,
         )
 
     def get_tokens_exchanges_from_asset_info(
@@ -987,7 +1032,8 @@ class ReserveClient:
 
     def blacklist_get(self) -> dict[str, Any]:
         return self.requestGET(
-            self.endpoints["setting-v4_v4_blacklist-addr"].full_path()
+            self.endpoints["setting-v4_v4_blacklist-addr"].full_path(),
+            fallback_host=KNRESERVE_GATEWAY_HOST,
         )
 
     def get_banned_addresses(self) -> list[str]:
@@ -1023,14 +1069,18 @@ class ReserveClient:
                         "expire_at": exp if exp else 0,
                     }
                 )
-            return self.requestPOST(endpoint, json=payload)
+            return self.requestPOST(
+                endpoint, json=payload, fallback_host=KNRESERVE_GATEWAY_HOST
+            )
 
         # remove: send array of addresses
         addrs = [
             (item if isinstance(item, str) else item[0])
             for item in list_of_addresses_and_desc
         ]
-        return self.requestDELETE(endpoint, json=addrs)
+        return self.requestDELETE(
+            endpoint, json=addrs, fallback_host=KNRESERVE_GATEWAY_HOST
+        )
 
     def whitelist_0x_get(self) -> dict[str, Any]:
         return self.requestGET(self.endpoints["0x_whitelist"].full_path())

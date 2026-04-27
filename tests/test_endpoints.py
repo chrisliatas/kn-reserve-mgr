@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import requests
 
 from kyberReserve.endpoints import EndpointItem, ReserveEndpoints, load_endpoints
-from kyberReserve.reserveClient import ReserveClient
+from kyberReserve.reserveClient import KNRESERVE_GATEWAY_HOST, ReserveClient
 
 
 class TestEndpoints(unittest.TestCase):
@@ -155,6 +155,55 @@ class TestEndpoints(unittest.TestCase):
                 )
             },
         )
+
+    def test_request_retries_gateway_on_connection_error(self):
+        client: ReserveClient = ReserveClient.__new__(ReserveClient)
+        client.host = "https://knstats.com"
+        client.timeout = 60
+        response = MagicMock()
+        response.status_code = 200
+        response.json.return_value = {"data": ["ok"]}
+
+        with patch.object(
+            client,
+            "_request",
+            side_effect=[requests.exceptions.ConnectionError("down"), response],
+        ) as request_mock:
+            resp = client.requestGET(
+                "rfq/orders",
+                params={"from_time": 1, "to_time": 2},
+                fallback_host=KNRESERVE_GATEWAY_HOST,
+            )
+
+        self.assertEqual(resp, {"success": {"data": ["ok"]}})
+        self.assertEqual(request_mock.call_count, 2)
+        self.assertEqual(
+            request_mock.call_args_list[0].kwargs["url"],
+            "https://knstats.com/rfq/orders",
+        )
+        self.assertEqual(
+            request_mock.call_args_list[1].kwargs["url"],
+            "https://gateway.knreserve.com/rfq/orders",
+        )
+
+    def test_request_does_not_retry_gateway_on_http_error(self):
+        client: ReserveClient = ReserveClient.__new__(ReserveClient)
+        client.host = "https://knstats.com"
+        client.timeout = 60
+        response = MagicMock()
+        response.status_code = 503
+        response.text = "service unavailable"
+
+        with patch.object(client, "_request", return_value=response) as request_mock:
+            resp = client.requestGET(
+                "rfq/orders",
+                params={"from_time": 1, "to_time": 2},
+                fallback_host=KNRESERVE_GATEWAY_HOST,
+            )
+
+        self.assertIn("failed", resp)
+        self.assertIn("bad http status 503", resp["failed"])
+        self.assertEqual(request_mock.call_count, 1)
 
 
 if __name__ == "__main__":
