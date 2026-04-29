@@ -172,7 +172,6 @@ class TestEndpoints(unittest.TestCase):
             resp = client.requestGET(
                 "rfq/orders",
                 params={"from_time": 1, "to_time": 2},
-                fallback_host=KNRESERVE_GATEWAY_HOST,
             )
 
         self.assertEqual(resp, {"success": {"data": ["ok"]}})
@@ -183,7 +182,30 @@ class TestEndpoints(unittest.TestCase):
         )
         self.assertEqual(
             request_mock.call_args_list[1].kwargs["url"],
-            "https://gateway.knreserve.com/rfq/orders",
+            f"{KNRESERVE_GATEWAY_HOST}/rfq/orders",
+        )
+
+    def test_request_retries_gateway_for_knstats_subdomain(self):
+        client: ReserveClient = ReserveClient.__new__(ReserveClient)
+        client.host = "https://staging-core-v3-gateway.knstats.com"
+        client.timeout = 60
+        response = MagicMock()
+        response.status_code = 200
+        response.json.return_value = {"data": ["ok"]}
+
+        with patch.object(
+            client,
+            "_request",
+            side_effect=[requests.exceptions.ConnectionError("down"), response],
+        ) as request_mock:
+            resp = client.requestGET(
+                "market-regime/volatility", params={"asset": "ETH"}
+            )
+
+        self.assertEqual(resp, {"success": {"data": ["ok"]}})
+        self.assertEqual(
+            request_mock.call_args_list[1].kwargs["url"],
+            f"{KNRESERVE_GATEWAY_HOST}/market-regime/volatility",
         )
 
     def test_request_does_not_retry_gateway_on_http_error(self):
@@ -198,11 +220,25 @@ class TestEndpoints(unittest.TestCase):
             resp = client.requestGET(
                 "rfq/orders",
                 params={"from_time": 1, "to_time": 2},
-                fallback_host=KNRESERVE_GATEWAY_HOST,
             )
 
         self.assertIn("failed", resp)
         self.assertIn("bad http status 503", resp["failed"])
+        self.assertEqual(request_mock.call_count, 1)
+
+    def test_request_does_not_retry_gateway_for_non_knstats_host(self):
+        client: ReserveClient = ReserveClient.__new__(ReserveClient)
+        client.host = "https://example.com"
+        client.timeout = 60
+
+        with patch.object(
+            client,
+            "_request",
+            side_effect=requests.exceptions.ConnectionError("down"),
+        ) as request_mock:
+            resp = client.requestGET("rfq/orders")
+
+        self.assertIn("failed", resp)
         self.assertEqual(request_mock.call_count, 1)
 
 

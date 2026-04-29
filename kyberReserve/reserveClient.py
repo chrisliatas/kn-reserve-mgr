@@ -158,6 +158,17 @@ class ReserveClient:
                 sts.append(f"{header.lower()}: {value}")
         return "\n".join(sts).encode()
 
+    @staticmethod
+    def _knstats_fallback_url(url: str) -> str | None:
+        parsed = urllib.parse.urlparse(url)
+        hostname = parsed.hostname or ""
+        if hostname != "knstats.com" and not hostname.endswith(".knstats.com"):
+            return None
+        fallback = urllib.parse.urlparse(KNRESERVE_GATEWAY_HOST)
+        return urllib.parse.urlunparse(
+            parsed._replace(scheme=fallback.scheme, netloc=fallback.netloc)
+        )
+
     def _request(
         self,
         method: str,
@@ -206,10 +217,11 @@ class ReserveClient:
         fallback_host: str | None = None,
     ) -> dict[str, Any]:
         endpoint_path = endpoint.lstrip("/")
+        url = f"{self.host}/{endpoint_path}"
         try:
             resp = self._request(
                 method=method,
-                url=f"{self.host}/{endpoint_path}",
+                url=url,
                 data=data,
                 params=params,
                 json=json,
@@ -226,18 +238,22 @@ class ReserveClient:
                 )
                 return {"failed": reason}
         except requests.exceptions.RequestException as e:
-            if fallback_host and isinstance(e, requests.exceptions.ConnectionError):
+            fallback_url = (
+                f"{fallback_host}/{endpoint_path}"
+                if fallback_host
+                else self._knstats_fallback_url(url)
+            )
+            if fallback_url and isinstance(e, requests.exceptions.ConnectionError):
                 lgr.warning(
-                    "connection error for %s/%s, retrying via %s: %r",
-                    self.host,
-                    endpoint_path,
-                    fallback_host,
+                    "connection error for %s, retrying via %s: %r",
+                    url,
+                    fallback_url,
                     e,
                 )
                 try:
                     resp = self._request(
                         method=method,
-                        url=f"{fallback_host}/{endpoint_path}",
+                        url=fallback_url,
                         data=data,
                         params=params,
                         json=json,
@@ -249,7 +265,7 @@ class ReserveClient:
                         return {"success": resp_data}
                     reason = (
                         f" bad http status {resp.status_code} reply:{resp.text} for"
-                        f" request to {fallback_host}/{endpoint_path}, params:{params},"
+                        f" request to {fallback_url}, params:{params},"
                         f" data: {data}, json: {json}"
                     )
                     return {"failed": reason}
@@ -329,6 +345,20 @@ class ReserveClient:
             )
             resp.raise_for_status()
         except Exception as ex:
+            fallback_url = self._knstats_fallback_url(url)
+            if fallback_url and isinstance(ex, requests.exceptions.ConnectionError):
+                try:
+                    resp = self._request(
+                        "GET",
+                        fallback_url,
+                        params=params,
+                        timeout=timeout,
+                        secured=secured,
+                    )
+                    resp.raise_for_status()
+                except Exception as fallback_ex:
+                    return {"failed": str(fallback_ex)}
+                return {"success": resp}
             if (
                 isinstance(ex, requests.exceptions.HTTPError)
                 and ex.response is not None
@@ -520,7 +550,6 @@ class ReserveClient:
         return self.requestGET(
             self.endpoints["rfq_orders"].full_path(),
             params=params,
-            fallback_host=KNRESERVE_GATEWAY_HOST,
         )
 
     def get_tokens_exchanges_from_asset_info(
@@ -1033,7 +1062,6 @@ class ReserveClient:
     def blacklist_get(self) -> dict[str, Any]:
         return self.requestGET(
             self.endpoints["setting-v4_v4_blacklist-addr"].full_path(),
-            fallback_host=KNRESERVE_GATEWAY_HOST,
         )
 
     def get_banned_addresses(self) -> list[str]:
@@ -1069,18 +1097,14 @@ class ReserveClient:
                         "expire_at": exp if exp else 0,
                     }
                 )
-            return self.requestPOST(
-                endpoint, json=payload, fallback_host=KNRESERVE_GATEWAY_HOST
-            )
+            return self.requestPOST(endpoint, json=payload)
 
         # remove: send array of addresses
         addrs = [
             (item if isinstance(item, str) else item[0])
             for item in list_of_addresses_and_desc
         ]
-        return self.requestDELETE(
-            endpoint, json=addrs, fallback_host=KNRESERVE_GATEWAY_HOST
-        )
+        return self.requestDELETE(endpoint, json=addrs)
 
     def whitelist_0x_get(self) -> dict[str, Any]:
         return self.requestGET(self.endpoints["0x_whitelist"].full_path())
