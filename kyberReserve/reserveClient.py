@@ -88,6 +88,9 @@ class ReserveClient:
         self.auth_data = AuthenticationData(key_file)
         self.auth_ctx = authContext
         self.host, self.key_id, self.secret = self.auth_data.get_ctx(self.auth_ctx)
+        self.fallback_host = self._knstats_host(self.host)
+        if self.fallback_host:
+            self.host = KNRESERVE_GATEWAY_HOST
         self.endpoints = ReserveEndpoints(endpoints_json).endpoints
         lgr.info(f"ReserveClient initialized with auth context: {self.auth_ctx}")
         self.timeout = timeout
@@ -159,14 +162,23 @@ class ReserveClient:
         return "\n".join(sts).encode()
 
     @staticmethod
-    def _knstats_fallback_url(url: str) -> str | None:
+    def _knstats_host(url: str) -> str | None:
         parsed = urllib.parse.urlparse(url)
         hostname = parsed.hostname or ""
         if hostname != "knstats.com" and not hostname.endswith(".knstats.com"):
             return None
-        fallback = urllib.parse.urlparse(KNRESERVE_GATEWAY_HOST)
         return urllib.parse.urlunparse(
-            parsed._replace(scheme=fallback.scheme, netloc=fallback.netloc)
+            parsed._replace(path="", params="", query="", fragment="")
+        )
+
+    @staticmethod
+    def _gateway_url_for_knstats_url(url: str) -> str | None:
+        if not ReserveClient._knstats_host(url):
+            return None
+        parsed = urllib.parse.urlparse(url)
+        gateway = urllib.parse.urlparse(KNRESERVE_GATEWAY_HOST)
+        return urllib.parse.urlunparse(
+            parsed._replace(scheme=gateway.scheme, netloc=gateway.netloc)
         )
 
     def _request(
@@ -241,7 +253,11 @@ class ReserveClient:
             fallback_url = (
                 f"{fallback_host}/{endpoint_path}"
                 if fallback_host
-                else self._knstats_fallback_url(url)
+                else (
+                    f"{self.fallback_host}/{endpoint_path}"
+                    if getattr(self, "fallback_host", None)
+                    else None
+                )
             )
             if fallback_url and isinstance(e, requests.exceptions.ConnectionError):
                 lgr.warning(
@@ -339,13 +355,15 @@ class ReserveClient:
         self, url: str, params: dict, timeout: int, secured: bool = True
     ) -> dict[str, Any]:
         """Used to request **out-of-context URL**."""
+        original_url = url
+        fallback_url = original_url if self._knstats_host(url) else None
+        request_url = self._gateway_url_for_knstats_url(url) or url
         try:
             resp: Response = self._request(
-                "GET", url, params=params, timeout=timeout, secured=secured
+                "GET", request_url, params=params, timeout=timeout, secured=secured
             )
             resp.raise_for_status()
         except Exception as ex:
-            fallback_url = self._knstats_fallback_url(url)
             if fallback_url and isinstance(ex, requests.exceptions.ConnectionError):
                 try:
                     resp = self._request(
@@ -359,6 +377,7 @@ class ReserveClient:
                 except Exception as fallback_ex:
                     return {"failed": str(fallback_ex)}
                 return {"success": resp}
+            url = original_url
             if (
                 isinstance(ex, requests.exceptions.HTTPError)
                 and ex.response is not None

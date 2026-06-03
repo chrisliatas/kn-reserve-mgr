@@ -156,9 +156,10 @@ class TestEndpoints(unittest.TestCase):
             },
         )
 
-    def test_request_retries_gateway_on_connection_error(self):
+    def test_request_retries_knstats_on_gateway_connection_error(self):
         client: ReserveClient = ReserveClient.__new__(ReserveClient)
-        client.host = "https://knstats.com"
+        client.host = KNRESERVE_GATEWAY_HOST
+        client.fallback_host = "https://knstats.com"
         client.timeout = 60
         response = MagicMock()
         response.status_code = 200
@@ -178,16 +179,17 @@ class TestEndpoints(unittest.TestCase):
         self.assertEqual(request_mock.call_count, 2)
         self.assertEqual(
             request_mock.call_args_list[0].kwargs["url"],
-            "https://knstats.com/rfq/orders",
+            f"{KNRESERVE_GATEWAY_HOST}/rfq/orders",
         )
         self.assertEqual(
             request_mock.call_args_list[1].kwargs["url"],
-            f"{KNRESERVE_GATEWAY_HOST}/rfq/orders",
+            "https://knstats.com/rfq/orders",
         )
 
-    def test_request_retries_gateway_for_knstats_subdomain(self):
+    def test_request_retries_knstats_subdomain_on_gateway_connection_error(self):
         client: ReserveClient = ReserveClient.__new__(ReserveClient)
-        client.host = "https://staging-core-v3-gateway.knstats.com"
+        client.host = KNRESERVE_GATEWAY_HOST
+        client.fallback_host = "https://staging-core-v3-gateway.knstats.com"
         client.timeout = 60
         response = MagicMock()
         response.status_code = 200
@@ -205,12 +207,13 @@ class TestEndpoints(unittest.TestCase):
         self.assertEqual(resp, {"success": {"data": ["ok"]}})
         self.assertEqual(
             request_mock.call_args_list[1].kwargs["url"],
-            f"{KNRESERVE_GATEWAY_HOST}/market-regime/volatility",
+            "https://staging-core-v3-gateway.knstats.com/market-regime/volatility",
         )
 
-    def test_request_does_not_retry_gateway_on_http_error(self):
+    def test_request_does_not_retry_knstats_on_gateway_http_error(self):
         client: ReserveClient = ReserveClient.__new__(ReserveClient)
-        client.host = "https://knstats.com"
+        client.host = KNRESERVE_GATEWAY_HOST
+        client.fallback_host = "https://knstats.com"
         client.timeout = 60
         response = MagicMock()
         response.status_code = 503
@@ -226,9 +229,10 @@ class TestEndpoints(unittest.TestCase):
         self.assertIn("bad http status 503", resp["failed"])
         self.assertEqual(request_mock.call_count, 1)
 
-    def test_request_does_not_retry_gateway_for_non_knstats_host(self):
+    def test_request_does_not_retry_without_fallback_host(self):
         client: ReserveClient = ReserveClient.__new__(ReserveClient)
         client.host = "https://example.com"
+        client.fallback_host = None
         client.timeout = 60
 
         with patch.object(
@@ -240,6 +244,50 @@ class TestEndpoints(unittest.TestCase):
 
         self.assertIn("failed", resp)
         self.assertEqual(request_mock.call_count, 1)
+
+    def test_request_get_url_prefers_gateway_for_knstats_url(self):
+        client: ReserveClient = ReserveClient.__new__(ReserveClient)
+        response = MagicMock()
+        response.raise_for_status.return_value = None
+
+        with patch.object(client, "_request", return_value=response) as request_mock:
+            resp = client.requestGET_url(
+                "https://knstats.com/rfq/orders",
+                params={"from_time": 1, "to_time": 2},
+                timeout=10,
+            )
+
+        self.assertEqual(resp, {"success": response})
+        self.assertEqual(
+            request_mock.call_args.args[1],
+            f"{KNRESERVE_GATEWAY_HOST}/rfq/orders",
+        )
+
+    def test_request_get_url_retries_original_knstats_on_gateway_connection_error(self):
+        client: ReserveClient = ReserveClient.__new__(ReserveClient)
+        response = MagicMock()
+        response.raise_for_status.return_value = None
+
+        with patch.object(
+            client,
+            "_request",
+            side_effect=[requests.exceptions.ConnectionError("down"), response],
+        ) as request_mock:
+            resp = client.requestGET_url(
+                "https://knstats.com/rfq/orders",
+                params={"from_time": 1, "to_time": 2},
+                timeout=10,
+            )
+
+        self.assertEqual(resp, {"success": response})
+        self.assertEqual(
+            request_mock.call_args_list[0].args[1],
+            f"{KNRESERVE_GATEWAY_HOST}/rfq/orders",
+        )
+        self.assertEqual(
+            request_mock.call_args_list[1].args[1],
+            "https://knstats.com/rfq/orders",
+        )
 
 
 if __name__ == "__main__":
