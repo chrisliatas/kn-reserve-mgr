@@ -1827,6 +1827,10 @@ class ReserveClient:
             self.endpoints["price-volatility-v4_v4_symbol-tiers"].full_path()
         )
 
+    def get_near_prop_amm_config(self) -> dict[str, Any]:
+        """Get propAMM config settings for the Near protocol."""
+        return self.requestGET(self.endpoints["near-prop-amm_api_config"].full_path())
+
     def get_legacy_volatility(
         self,
         pairs: list[str],
