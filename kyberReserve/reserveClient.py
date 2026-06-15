@@ -1846,6 +1846,103 @@ class ReserveClient:
             self.endpoints["near-prop-amm_api_pnl"].full_path(), params=params
         )
 
+    def get_near_prop_amm_balances(self) -> dict[str, Any]:
+        """Get Near propAMM pool balances (pool name -> balance)."""
+        return self.requestGET(self.endpoints["near-prop-amm_api_balances"].full_path())
+
+    def get_near_prop_amm_fair_price(self) -> dict[str, Any]:
+        """Get Near propAMM fair prices per pool (afp_ask/afp_bid)."""
+        return self.requestGET(
+            self.endpoints["near-prop-amm_api_fair-price"].full_path()
+        )
+
+    def get_near_prop_amm_public_price(self) -> dict[str, Any]:
+        """Get Near propAMM public prices per pool (afp_ask/afp_bid)."""
+        return self.requestGET(
+            self.endpoints["near-prop-amm_api_public-price"].full_path()
+        )
+
+    def get_near_prop_amm_market_price(self) -> dict[str, Any]:
+        """Get Near propAMM market prices per pool (afp_ask/afp_bid)."""
+        return self.requestGET(
+            self.endpoints["near-prop-amm_api_market-price"].full_path()
+        )
+
+    def get_near_prop_amm_trades(self, from_time: int, to_time: int) -> dict[str, Any]:
+        """Get Near propAMM recent trades for the given time range.
+
+        Args:
+            from_time: start timestamp in milliseconds.
+            to_time: end timestamp in milliseconds.
+        Returns:
+            {'success': list[dict]} of trade records, or {'failed': reason}.
+        """
+        params = {"from": from_time, "to": to_time}
+        return self.requestGET(
+            self.endpoints["near-prop-amm_api_trades"].full_path(), params=params
+        )
+
+    def near_prop_amm_calc_y(
+        self, x: float, xv: list[float], yv: list[float]
+    ) -> dict[str, Any]:
+        """Test helper: interpolate slippage on the propAMM curve.
+
+        Args:
+            x: query x value.
+            xv: x-axis breakpoints of the curve.
+            yv: y-axis values matching ``xv``.
+        Returns:
+            {'success': dict} with "slippage_bps" (and echoed inputs), or
+            {'failed': reason}.
+        """
+        params = {
+            "x": x,
+            "xv": ",".join(str(v) for v in xv),
+            "yv": ",".join(str(v) for v in yv),
+        }
+        return self.requestGET(
+            self.endpoints["near-prop-amm_api_calc-y"].full_path(), params=params
+        )
+
+    def near_prop_amm_calc_integral(
+        self, a: float, b: float, target: float, start: float, end: float
+    ) -> dict[str, Any]:
+        """Test helper: compute the propAMM integral for the given bounds.
+
+        Returns:
+            {'success': dict} with "integral" (and echoed inputs), or
+            {'failed': reason}.
+        """
+        params = {"a": a, "b": b, "target": target, "start": start, "end": end}
+        return self.requestGET(
+            self.endpoints["near-prop-amm_api_calc-integral"].full_path(),
+            params=params,
+        )
+
+    def near_prop_amm_market_price_test(
+        self, token_in: str, token_out: str, amount_in: int, deadline: int
+    ) -> dict[str, Any]:
+        """Test helper: fetch a forward-quote market price for a swap.
+
+        Args:
+            token_in: input token NEP-141 asset id.
+            token_out: output token NEP-141 asset id.
+            amount_in: input amount in raw token units.
+            deadline: quote deadline timestamp in milliseconds.
+        Returns:
+            {'success': dict} with the forward quote, or {'failed': reason}.
+        """
+        params = {
+            "token_in": token_in,
+            "token_out": token_out,
+            "amount_in": amount_in,
+            "deadline": deadline,
+        }
+        return self.requestGET(
+            self.endpoints["near-prop-amm_api_market-price-test"].full_path(),
+            params=params,
+        )
+
     def get_legacy_volatility(
         self,
         pairs: list[str],
