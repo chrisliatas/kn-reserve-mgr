@@ -1831,6 +1831,21 @@ class ReserveClient:
         """Get propAMM config settings for the Near protocol."""
         return self.requestGET(self.endpoints["near-prop-amm_api_config"].full_path())
 
+    def get_near_prop_amm_pnl(self, from_time: int, to_time: int) -> dict[str, Any]:
+        """Get Near propAMM PnL per pair for the given time range.
+
+        Args:
+            from_time: start timestamp in milliseconds.
+            to_time: end timestamp in milliseconds.
+        Returns:
+            {'success': dict} keyed by pair (e.g. "BTC-USDT") plus "_total", each
+            with "Volume", "MarkoutPNL", "PositionPNL", or {'failed': reason}.
+        """
+        params = {"from": from_time, "to": to_time}
+        return self.requestGET(
+            self.endpoints["near-prop-amm_api_pnl"].full_path(), params=params
+        )
+
     def get_legacy_volatility(
         self,
         pairs: list[str],
