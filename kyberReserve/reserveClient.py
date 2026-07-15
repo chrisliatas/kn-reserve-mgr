@@ -1078,20 +1078,116 @@ class ReserveClient:
             # print(f"Finished at: {_dt_finished}")
         return rfqs
 
-    def blacklist_get(self) -> dict[str, Any]:
+    def blacklist_get(self, from_time: int | None = None) -> dict[str, Any]:
+        """Get an RFQ blacklist snapshot or delta using an updatedTime cursor."""
+        if from_time is not None and (
+            isinstance(from_time, bool)
+            or not isinstance(from_time, int)
+            or from_time < 0
+        ):
+            return {"failed": "from_time must be a non-negative integer (milliseconds)"}
+        params = {"from_time": from_time} if from_time is not None else None
         return self.requestGET(
-            self.endpoints["setting-v4_v4_blacklist-addr"].full_path(),
+            self.endpoints["rfq_blacklist"].full_path(), params=params
         )
 
+    @staticmethod
+    def _blacklist_payload(response: dict[str, Any]) -> dict[str, Any] | None:
+        payload = response.get("success")
+        if isinstance(payload, dict):
+            return payload
+        return None
+
+    @staticmethod
+    def _blacklist_entry_key(entry: Any) -> str:
+        if isinstance(entry, str):
+            return f"address:{entry.lower()}"
+        if isinstance(entry, dict):
+            for field in ("address", "a", "addr"):
+                if field in entry:
+                    return f"address:{str(entry[field]).lower()}"
+            if "id" in entry:
+                return f"id:{str(entry['id']).lower()}"
+        return f"value:{str(entry).lower()}"
+
+    @classmethod
+    def _blacklist_addresses(cls, entries: list[Any]) -> list[str]:
+        addresses: list[str] = []
+        for entry in entries:
+            if isinstance(entry, str):
+                address = entry
+            elif isinstance(entry, dict):
+                address = entry.get("address", entry.get("a", ""))
+            else:
+                address = ""
+            if isinstance(address, str) and address:
+                addresses.append(address.lower())
+        return addresses
+
+    def blacklist_sync(self) -> dict[str, Any]:
+        """Initialize or incrementally update the in-memory RFQ blacklist.
+
+        The first call fetches a full snapshot. Later calls request deltas using
+        the previous response's ``updatedTime`` cursor. Callers should normally
+        invoke this no more often than once per minute.
+        """
+        state: dict[str, Any] | None = getattr(self, "_blacklist_state", None)
+        cursor = state.get("updatedTime") if state else None
+        response = self.blacklist_get(from_time=cursor)
+        if "failed" in response:
+            return response
+
+        payload = self._blacklist_payload(response)
+        if payload is None:
+            return {"failed": "blacklist response must contain an object payload"}
+        updated_time = payload.get("updatedTime")
+        if (
+            isinstance(updated_time, bool)
+            or not isinstance(updated_time, int)
+            or updated_time < 0
+        ):
+            return {"failed": "blacklist response missing valid updatedTime"}
+
+        additions = payload.get("blacklist", [])
+        revoked = payload.get("revoked", [])
+        if not isinstance(additions, list) or not isinstance(revoked, list):
+            return {"failed": "blacklist and revoked must be lists"}
+
+        if state is None:
+            current_entries = list(additions)
+        else:
+            current_entries = list(state["blacklist"])
+            by_key = {
+                self._blacklist_entry_key(entry): entry for entry in current_entries
+            }
+            for entry in revoked:
+                by_key.pop(self._blacklist_entry_key(entry), None)
+            for entry in additions:
+                by_key[self._blacklist_entry_key(entry)] = entry
+            current_entries = list(by_key.values())
+
+        self._blacklist_state = {
+            "blacklist": current_entries,
+            "updatedTime": updated_time,
+        }
+        return {
+            "success": {
+                "blacklist": current_entries,
+                "revoked": revoked,
+                "updatedTime": updated_time,
+                "from_time": cursor,
+                "is_delta": cursor is not None,
+            }
+        }
+
     def get_banned_addresses(self) -> list[str]:
-        """Get only banned addresses from the 0x blacklist data."""
+        """Get only banned addresses from the merged RFQ blacklist snapshot."""
         try:
-            banned = self.blacklist_get()["success"]["data"]
+            banned = self.blacklist_sync()["success"]["blacklist"]
         except KeyError as e:
             lgr.error(f"Cannot get banned addresses - KeyError: {e}")
             return []
-        banned_addr = [a["a"] for a in banned]
-        return [i.lower() for i in banned_addr]
+        return self._blacklist_addresses(banned)
 
     def blacklist_set(
         self, list_of_addresses_and_desc: list, list_type="add"
