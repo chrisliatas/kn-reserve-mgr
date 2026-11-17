@@ -1332,6 +1332,34 @@ class ReserveClient:
         """Get list of supported integrations from RFQ service."""
         return self.requestGET(self.endpoints["rfq_supported_integration"].full_path())
 
+    def get_market_calendar_events(
+        self,
+        period: str | None = None,
+        min_severity: str = "high",
+        date: str | None = None,
+    ) -> dict[str, Any]:
+        """Get market calendar events; the market-calendar service requires VPN."""
+        if date is not None and period is not None:
+            return {"failed": "date cannot be combined with period"}
+        params = {"min_severity": min_severity}
+        if date is not None:
+            params["date"] = date
+        else:
+            params["period"] = period or "upcoming"
+        endpoint = self.endpoints["events"]
+        response = self.requestGET_url(
+            endpoint.full_url(),
+            params=params,
+            timeout=self.timeout,
+            secured=False,
+        )
+        if "failed" in response:
+            return response
+        try:
+            return {"success": response["success"].json()}
+        except requests.exceptions.JSONDecodeError as exc:
+            return {"failed": f"Invalid JSON from market-calendar: {exc}"}
+
     def get_all_pair_rfq(self) -> dict[str, Any]:
         """Get all pair RFQ data."""
         return self.requestGET(self.endpoints["setting-v4_v4_all-pair-rfq"].full_path())
